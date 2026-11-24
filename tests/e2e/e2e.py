@@ -532,9 +532,9 @@ def cmd_latency(a):
 
 
 # The current source's label only (same expression as lib.sh CUR_LABEL_JS): with more than one source
-# the panel holds one label per source.
+# the panel holds one label per source. Upper-cased: the engine shows "vi"/"en" (D32), MODES are upper case.
 INDICATOR_JS = ('(k => k._indicatorLabels?.[k._inputSourceManager?.currentSource?.index]?.text ?? "")'
-                '(Main.panel.statusArea.keyboard)')
+                '(Main.panel.statusArea.keyboard).toUpperCase()')
 
 
 def shell_eval(conn, js):
