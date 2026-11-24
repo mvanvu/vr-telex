@@ -9,6 +9,8 @@ Role (argv[1], or taken from the file name when installed as vr-talex):
             on exit it leaves the address file with empty values (what the
             real fcitx5 does, spike Q5).
   fcitx5-stuck  like fcitx5, but Exit never makes it quit.
+  fcitx5-ibus   like fcitx5, and also owns org.freedesktop.portal.IBus, as
+            the real fcitx5's IBus frontend does.
   ibus      owns org.freedesktop.portal.IBus (a running ibus-daemon).
 """
 import os
@@ -27,6 +29,8 @@ CONTROLLER_XML = """
   </interface>
 </node>
 """
+
+FCITX_ROLES = ("fcitx5", "fcitx5-stuck", "fcitx5-ibus")
 
 
 def main() -> int:
@@ -61,9 +65,11 @@ def main() -> int:
     if role == "vr-talex":
         write_addr(f"unix:path={runtime}/vr-talex/ibus-{pid}", str(pid))
         names = ["org.fcitx.Fcitx5", "org.freedesktop.portal.Fcitx"]
-    elif role in ("fcitx5", "fcitx5-stuck"):
+    elif role in FCITX_ROLES:
         write_addr(f"unix:path={runtime}/fake-fcitx5-{pid}", str(pid))
         names = ["org.fcitx.Fcitx5", "org.freedesktop.portal.Fcitx"]
+        if role == "fcitx5-ibus":
+            names.append("org.freedesktop.portal.IBus")
     elif role == "ibus":
         names = ["org.freedesktop.portal.IBus"]
     else:
@@ -76,18 +82,18 @@ def main() -> int:
                 os.unlink(addr_file)
             except FileNotFoundError:
                 pass
-        elif role in ("fcitx5", "fcitx5-stuck"):
+        elif role in FCITX_ROLES:
             write_addr("", "")
         loop.quit()
         return False
 
-    if role in ("fcitx5", "fcitx5-stuck"):
+    if role in FCITX_ROLES:
         node = Gio.DBusNodeInfo.new_for_xml(CONTROLLER_XML)
 
         def on_call(_c, _s, _p, _i, method, _params, invocation):
             invocation.return_value(None)
             # "fcitx5-stuck" acknowledges Exit but never quits.
-            if method == "Exit" and role == "fcitx5":
+            if method == "Exit" and role != "fcitx5-stuck":
                 GLib.idle_add(finish)
 
         conn.register_object("/controller", node.interfaces[0], on_call, None, None)

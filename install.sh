@@ -61,9 +61,21 @@ preflight() {
   bus_call GetId >/dev/null 2>&1 || die "no session D-Bus; run this from your desktop session"
   # Only the fcitx5 hand-over is supported and tested; a running ibus-daemon
   # would keep rewriting the IBus address file (spike open item O2).
-  if has_owner org.freedesktop.portal.IBus || systemctl --user is-active --quiet "$IBUS_GNOME_UNIT" 2>/dev/null; then
+  if ibus_daemon_running; then
     die "ibus-daemon is running; this installer only takes over from fcitx5. Nothing was changed."
   fi
+}
+
+# fcitx5's own IBus frontend also owns org.freedesktop.portal.IBus, and it
+# quits with the rest of fcitx5 at the hand-over. So the portal name means
+# ibus-daemon only when its owner is not the process that owns
+# org.fcitx.Fcitx5.
+ibus_daemon_running() {
+  local portal fcitx
+  systemctl --user is-active --quiet "$IBUS_GNOME_UNIT" 2>/dev/null && return 0
+  portal=$(owner_pid org.freedesktop.portal.IBus) || return 1
+  fcitx=$(owner_pid "$FCITX_NAME") || return 0
+  [ "$portal" != "$fcitx" ]
 }
 
 build_binary() {

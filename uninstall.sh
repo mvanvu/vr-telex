@@ -23,6 +23,10 @@ remove_if_ours() {
 # No backup (deleted by hand): remove only what is certainly ours.
 remove_without_backup() {
   warn "no backup found in $BACKUP_DIR; removing vr-talex files only"
+  # The activation shadow goes, and the bus drops it, before the unit stops,
+  # so a client call in between cannot start vr-talex again (see restore_all).
+  if cmp -s -- <(render_dbus_svc) "$DBUS_SVC_DST"; then rm -f -- "$DBUS_SVC_DST"; fi
+  reload_bus
   systemctl --user disable --now "$UNIT" >/dev/null 2>&1 || true
   rm -f -- "$BIN_DST"
   remove_if_ours "$REPO/packaging/vr-talex.service" "$UNIT_DST"
@@ -32,7 +36,6 @@ remove_without_backup() {
     rm -f -- "$XINPUTRC"
     warn "removed ~/.xinputrc; run 'im-config' to choose an input method framework again"
   fi
-  if cmp -s -- <(render_dbus_svc) "$DBUS_SVC_DST"; then rm -f -- "$DBUS_SVC_DST"; fi
   rm -f -- "$DAEMON_STATE_DIR/mode"
   systemctl --user daemon-reload >/dev/null 2>&1 || true
   reload_bus

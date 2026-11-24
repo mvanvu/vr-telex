@@ -2,9 +2,11 @@
 Description=vr-talex Vietnamese Telex input method
 PartOf=graphical-session.target
 After=graphical-session.target
-# Restart forever, but never lock the user out permanently (SEC-17).
-StartLimitIntervalSec=60
-StartLimitBurst=10
+# Restart forever (SEC-17): no start rate limit, so a cause that fails fast
+# (another instance holding the lock, a refused address file, no display yet)
+# never leaves the unit in start-limit-hit once it is gone. The back-off in
+# [Service] keeps such a loop slow instead.
+StartLimitIntervalSec=0
 
 [Service]
 # The daemon sends READY=1 once it owns its D-Bus names and has written the
@@ -14,7 +16,12 @@ Type=notify
 NotifyAccess=main
 ExecStart="%h/.local/bin/vr-talex"
 Restart=always
+# The first restart comes after 1 s (D22); repeated ones back off to at most
+# 15 s. A long healthy run does not reset systemd's restart count, so the
+# cap also bounds how long keys stay raw after a crash late in the session.
 RestartSec=1
+RestartSteps=4
+RestartMaxDelaySec=15
 TimeoutStartSec=10
 WatchdogSec=10
 

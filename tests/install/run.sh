@@ -20,7 +20,8 @@ SCENARIOS=(fresh_fcitx5 fresh_no_fcitx5 empty_sources broken_daemon root_refused
   no_cargo ibus_refused activation_shadow uninstall_without_backup uninstall_not_installed
   edited_after_install failed_restore symlinked_config fcitx5_unit fcitx5_stuck
   reinstall_backup_deleted special_home rerun_failure bad_xdg edited_then_reinstall
-  record_write_fails)
+  record_write_fails unit_restart_policy uninstall_activation_gap
+  uninstall_activation_gap_no_backup fcitx5_owns_ibus_portal ibus_beside_fcitx5_refused)
 # A HOME with a space, an ampersand and a quote (special_home scenario).
 SPECIAL_HOME_NAME="h o&m'e"
 
@@ -663,6 +664,163 @@ EOF
   snap "$T8_SANDBOX/post.snap" noibus
   check "everything restored" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
   check "fcitx5 runs again" has_owner org.fcitx.Fcitx5
+}
+
+t_fcitx5_owns_ibus_portal() {
+  # FR-4 on the real desktop: fcitx5's IBus frontend owns
+  # org.freedesktop.portal.IBus. That is fcitx5, not ibus-daemon, so install
+  # hands it over like any fcitx5, and the name is free afterwards.
+  gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us')]"
+  setsid python3 "$T8_STUBS/fake-ime" fcitx5-ibus </dev/null >>"$XDG_RUNTIME_DIR/fake-fcitx5.log" 2>&1 &
+  gdbus wait --session --timeout 5 org.freedesktop.portal.IBus
+  gdbus wait --session --timeout 5 org.fcitx.Fcitx5
+  local fpid out rc=0
+  fpid=$(owner_pid org.fcitx.Fcitx5)
+  check "fcitx5 stub owns the IBus portal name too" [ "$(owner_pid org.freedesktop.portal.IBus)" = "$fpid" ]
+  out=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install exits 0" [ "$rc" = 0 ]
+  check "install did not take fcitx5 for ibus-daemon" sh -c "! printf '%s' \"\$1\" | grep -q 'ibus-daemon is running'" _ "$out"
+  check "fcitx5 asked to quit, not killed" grep -qx 'fcitx5-remote -e' "$XDG_RUNTIME_DIR/stub-calls.log"
+  check "old fcitx5 ($fpid) has exited" sh -c "! kill -0 $fpid 2>/dev/null"
+  check "nothing owns org.freedesktop.portal.IBus after the hand-over" no_owner org.freedesktop.portal.IBus
+  expect_installed
+  check "uninstall exits 0" run_uninstall
+  check "fcitx5 runs again" has_owner org.fcitx.Fcitx5
+  expect_no_vr_talex_left
+}
+
+t_ibus_beside_fcitx5_refused() {
+  # A real ibus-daemon next to a running fcitx5: the portal owner is not
+  # the fcitx5 process, so install still refuses and changes nothing.
+  gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us')]"
+  fcitx5 -d
+  setsid python3 "$T8_STUBS/fake-ime" ibus </dev/null >>"$XDG_RUNTIME_DIR/fake-ibus.log" 2>&1 &
+  gdbus wait --session --timeout 5 org.freedesktop.portal.IBus
+  snap "$T8_SANDBOX/pre.snap"
+  local out rc=0
+  out=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install exits non-zero" [ "$rc" -ne 0 ]
+  check "install names ibus-daemon" grep -q 'ibus-daemon' <<<"$out"
+  check "fcitx5 not asked to quit" sh -c "! grep -q fcitx5-remote '$XDG_RUNTIME_DIR/stub-calls.log'"
+  snap "$T8_SANDBOX/post.snap"
+  check "nothing changed" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
+}
+
+# Value of KEY= in the unit file (last one wins, as in systemd).
+unit_value() { sed -n "s/^$2=//p" "$1" | tail -n 1; }
+
+t_unit_restart_policy() {
+  # SEC-17 / D22: fast repeated failures (another instance holding the lock,
+  # a refused address file, no display yet) must never park the unit in
+  # start-limit-hit; it keeps retrying with a back-off instead.
+  local u="$T8_REPO/packaging/vr-talex.service" interval steps maxd sec
+  interval=$(unit_value "$u" StartLimitIntervalSec)
+  steps=$(unit_value "$u" RestartSteps)
+  maxd=$(unit_value "$u" RestartMaxDelaySec)
+  sec=$(unit_value "$u" RestartSec)
+  check "Restart=always" [ "$(unit_value "$u" Restart)" = always ]
+  check "first restart within 1 s (RestartSec=$sec)" [ "$sec" = 1 ]
+  check "no start rate limit (StartLimitIntervalSec=$interval)" [ "$interval" = 0 ]
+  check "restart delay grows in steps (RestartSteps=$steps)" sh -c "[ -n '$steps' ] && [ '$steps' -gt 0 ] 2>/dev/null"
+  check "restart delay is capped between 2 and 30 s (RestartMaxDelaySec=$maxd)" \
+    sh -c "[ -n '$maxd' ] && [ '$maxd' -ge 2 ] && [ '$maxd' -le 30 ] 2>/dev/null"
+  # Offline check by the real systemd parser: it loads the unit in a test
+  # manager and reports unknown or misplaced keys; it never talks to the
+  # user's own manager. ExecStart needs an executable at %h/.local/bin.
+  if command -v systemd-analyze >/dev/null 2>&1; then
+    mkdir -p "$HOME/.local/bin" "$XDG_CONFIG_HOME/systemd/user"
+    install -m 0755 "$T8_STUBS/fake-ime" "$HOME/.local/bin/vr-talex"
+    cp "$u" "$XDG_CONFIG_HOME/systemd/user/vr-talex.service"
+    local out rc=0
+    out=$(systemd-analyze --user --man=no verify "$XDG_CONFIG_HOME/systemd/user/vr-talex.service" 2>&1) || rc=$?
+    printf 'systemd-analyze --user verify (exit %s):\n%s\n' "$rc" "$out"
+    check "systemd-analyze --user verify exits 0" [ "$rc" = 0 ]
+    # Only lines about this unit count: system units it pulls in may complain
+    # about the long sandbox runtime path.
+    check "systemd-analyze reports nothing about vr-talex.service" \
+      sh -c "! printf '%s\n' \"\$1\" | grep -q 'vr-talex\.service'" _ "$out"
+  else
+    bad "systemd-analyze not found"
+  fi
+}
+
+t_uninstall_activation_gap() {
+  # Final review: an activation request for org.fcitx.Fcitx5 that arrives
+  # right after uninstall stops the unit (a fcitx-route app re-probing the
+  # vanished name) must not start vr-talex again; fcitx5 must come back.
+  pre_state_fcitx5
+  check "install exits 0" run_install
+  write_gapstub
+  local out rc=0 owner
+  out=$(PATH="$T8_SANDBOX/gapstub:$PATH" run_uninstall 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "uninstall exits 0" [ "$rc" = 0 ]
+  check "an activation request was sent right after the unit stopped" [ -s "$XDG_RUNTIME_DIR/gap-probe.log" ]
+  owner=$(owner_pid org.fcitx.Fcitx5 || echo 0)
+  check "org.fcitx.Fcitx5 has an owner" [ "$owner" != 0 ]
+  check "the owner is not vr-talex" sh -c "! tr '\0' '\n' </proc/$owner/cmdline 2>/dev/null | grep -q '/.local/bin/vr-talex'"
+  # pre_state_fcitx5 made the first "fcitx5 -d" call; uninstall makes the second.
+  check "uninstall started fcitx5 again" [ "$(grep -c "^fcitx5 -d" "$XDG_RUNTIME_DIR/stub-calls.log")" -ge 2 ]
+  check "no vr-talex process left running" no_vr_talex_alive
+  expect_no_vr_talex_left
+}
+
+t_uninstall_activation_gap_no_backup() {
+  # Same gap on the path where the backup was deleted by hand: uninstall
+  # removes only vr-talex's files, and an activation request right after the
+  # unit stops must not start vr-talex again.
+  pre_state_fcitx5
+  check "install exits 0" run_install
+  rm -rf -- "${XDG_DATA_HOME:?}/vr-talex/backup"
+  write_gapstub
+  local out rc=0 owner
+  out=$(PATH="$T8_SANDBOX/gapstub:$PATH" run_uninstall 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "uninstall without backup exits 0" [ "$rc" = 0 ]
+  check "it took the no-backup path" grep -q 'no backup found' <<<"$out"
+  check "an activation request was sent right after the unit stopped" [ -s "$XDG_RUNTIME_DIR/gap-probe.log" ]
+  owner=$(owner_pid org.fcitx.Fcitx5 || echo 0)
+  check "org.fcitx.Fcitx5 is not owned by vr-talex" \
+    sh -c "[ '$owner' = 0 ] || ! tr '\0' '\n' </proc/$owner/cmdline 2>/dev/null | grep -q '/.local/bin/vr-talex'"
+  check "no vr-talex process left running" no_vr_talex_alive
+  check "D-Bus shadow removed" [ ! -e "$XDG_DATA_HOME/dbus-1/services/org.fcitx.Fcitx5.service" ]
+  check "binary removed" [ ! -e "$HOME/.local/bin/vr-talex" ]
+}
+
+# True when no fake vr-talex the sandbox started is still alive.
+no_vr_talex_alive() {
+  local f pid
+  for f in "$XDG_RUNTIME_DIR"/stub-pids/vr-talex.*; do
+    [ -f "$f" ] || continue
+    pid=$(cat "$f")
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "  alive: $pid"
+      return 1
+    fi
+  done
+  return 0
+}
+
+# A systemctl in front of the stub that, the moment the vr-talex unit has
+# been stopped, sends a client call that may auto-start org.fcitx.Fcitx5.
+write_gapstub() {
+  mkdir -p "$T8_SANDBOX/gapstub"
+  cat >"$T8_SANDBOX/gapstub/systemctl" <<'EOF'
+#!/bin/sh
+# The sandbox systemctl stub, then a client call that may auto-start the
+# name, sent the moment the unit has stopped.
+rc=0
+"$T8_STUBS/systemctl" "$@" || rc=$?
+if [ "$*" = "--user disable --now vr-talex.service" ]; then
+  echo probe >>"$XDG_RUNTIME_DIR/gap-probe.log"
+  gdbus call --session --dest org.fcitx.Fcitx5 --object-path / \
+    --method org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1 || true
+fi
+exit "$rc"
+EOF
+  chmod +x "$T8_SANDBOX/gapstub/systemctl"
 }
 
 in_sandbox() {

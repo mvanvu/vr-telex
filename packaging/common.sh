@@ -381,7 +381,7 @@ restore_entry() {
 # rollback of a failed install (SEC-19, SEC-21). Every step runs even when
 # one fails; any failure keeps the backup and makes this return 1.
 restore_all() {
-  local i rel dst vr_pid f d key
+  local i rel dst vr_pid f d key svc_rel
   RESTORE_FAILED=()
   load_manifest
 
@@ -396,13 +396,29 @@ restore_all() {
     done
   done
 
+  # The D-Bus activation shadow goes first, and the bus drops it, before the
+  # unit stops: a client call to org.fcitx.Fcitx5 after the stop would
+  # otherwise start vr-talex again, and that process would keep the name
+  # after its unit file is gone, so fcitx5 could not take it back.
+  svc_rel=$(rel "$DBUS_SVC_DST")
+  if in_list "$svc_rel" "${M_ABSENT[@]}"; then
+    restore_entry "$svc_rel" absent
+  elif in_list "$svc_rel" "${M_PRESENT[@]}"; then
+    restore_entry "$svc_rel" present
+  fi
+  reload_bus
+
   vr_pid=$(unit_pid)
   if systemctl --user is-enabled --quiet "$UNIT" 2>/dev/null || systemctl --user is-active --quiet "$UNIT" 2>/dev/null; then
     systemctl --user disable --now "$UNIT" >/dev/null 2>&1 || warn "could not stop $UNIT"
   fi
 
-  for rel in "${M_ABSENT[@]}"; do restore_entry "$rel" absent; done
-  for rel in "${M_PRESENT[@]}"; do restore_entry "$rel" present; done
+  for rel in "${M_ABSENT[@]}"; do
+    [ "$rel" = "$svc_rel" ] || restore_entry "$rel" absent
+  done
+  for rel in "${M_PRESENT[@]}"; do
+    [ "$rel" = "$svc_rel" ] || restore_entry "$rel" present
+  done
 
   # IBus address files vr-talex published that did not exist before.
   if [ -d "$IBUS_BUS_DIR" ]; then
