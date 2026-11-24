@@ -12,8 +12,8 @@
 | T8 | `install.sh` / `uninstall.sh` + systemd user unit + environment.d + fcitx5 hand-over + gsettings source + backups/restore, idempotent | be | T1, T2 | security | AC-5, AC-6, D1, D9, D11, SEC-3, SEC-17, SEC-19, SEC-20, SEC-21, SEC-22, SEC-23, SEC-24, SEC-28 | `install.sh`, `uninstall.sh`, `packaging/**`, `tests/install/**` | script tests with temp HOME + `GSETTINGS_BACKEND=keyfile` | done | 1 |
 | T9 | E2E stress harness: headless nested gnome-shell, RemoteDesktop key injection at 15 ms, gnome-terminal / Chrome (CDP) / VS Code readback, 5,000-word corpus, 3 runs per app, latency p99 | be | T1 | - | AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-10, D12, SEC-1, SEC-29 | `tests/e2e/**` | `tests/e2e/run.sh --smoke` | done | 1 |
 | T10 | Free-order circumflex and đ (aa/ee/oo, dd non-adjacent, D18) + golden regeneration + T2 re-check nits | be | T2, T3 | - | AC-1, D18, SEC-2, SEC-4 | worktree ../vr-talex-wt-T10: `crates/telex-core/src/**`, `crates/telex-core/tests/rules.rs`, `crates/telex-core/tests/golden/**`, `tools/golden-gen/gen.py` | `cargo test -p telex-core` | reverted (D28, 20cab1a) | 0 |
-| FR-1 | Next-login Qt env: QT_IM_MODULE=fcitx in packaging/90-vr-talex.conf + Qt 5 app check through fe-fcitx (D27) | be | T6, T8 | - | AC-2, D20, D25, D27 | packaging/90-vr-talex.conf, tests/install/run.sh (expected content only) | tests/install/run.sh + Qt 5 sandbox check | in-progress | 0 |
-| FR-3 | VS Code integrated terminal: no lost letters at 15 ms/key (D26 → D28 fix now) | be | T5 merged | security | AC-2, D26, D28 | crates/fe-ibus/** and/or crates/ime-core/** (decided by root cause) | e2e code-term 15 ms/key, 3 runs | todo | 0 |
+| FR-1 | Next-login Qt env: QT_IM_MODULE=fcitx in packaging/90-vr-talex.conf + Qt 5 app check through fe-fcitx (D27) | be | T6, T8 | - | AC-2, D20, D25, D27 | packaging/90-vr-talex.conf, tests/install/run.sh (expected content only) | tests/install/run.sh + Qt 5 sandbox check | done | 0 |
+| FR-3 | VS Code integrated terminal: no lost letters at 15 ms/key (D26 → D28 fix now) | be | T5 merged | security | AC-2, D26, D28 | crates/fe-ibus/** and/or crates/ime-core/** (decided by root cause) | e2e code-term 15 ms/key, 3 runs | in-progress | 0 |
 | REV-T10 | Review of the T10 revert (D28) | be | - | - | D28 | (review only) | cargo test telex-core, ime-core | done | 0 |
 
 ## Notes
@@ -42,3 +42,4 @@ stopped 21:34: usage limit — see gaps.md
 resumed 23:51 after usage-limit reset: fresh T5 re-check reviewer (opus) + fresh FR-1 developer (sonnet)
 held for user: account_switch for local.md (cswap installed; which accounts may the leader switch to near a usage limit, or none) — ask on return with shellcheck
 follow-up nit (T5 re-check, low): crates/fe-ibus/src/address.rs:109-114 lock file opened without O_NOFOLLOW — rides along FR-3 if it touches fe-ibus, else report.
+worktree: FR-3 → ../vr-talex-wt-FR3 (branch fr3-codeterm from db5490a+docs)

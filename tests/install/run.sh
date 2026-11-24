@@ -183,6 +183,7 @@ expect_installed() {
   check "binary is VR_TALEX_BIN" cmp -s "$VR_TALEX_BIN" "$HOME/.local/bin/vr-talex"
   check "unit = packaging template" cmp -s "$T8_REPO/packaging/vr-talex.service" "$XDG_CONFIG_HOME/systemd/user/vr-talex.service"
   check "environment.d = packaging template" cmp -s "$T8_REPO/packaging/90-vr-talex.conf" "$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf"
+  check "environment.d sets QT_IM_MODULE=fcitx (D27)" grep -qx 'QT_IM_MODULE=fcitx' "$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf"
   check "xinputrc = packaging template" cmp -s "$T8_REPO/packaging/xinputrc" "$HOME/.xinputrc"
   check "autostart override = packaging template" cmp -s "$T8_REPO/packaging/org.fcitx.Fcitx5.desktop" "$XDG_CONFIG_HOME/autostart/org.fcitx.Fcitx5.desktop"
   check "autostart override hides fcitx5" grep -qx 'Hidden=true' "$XDG_CONFIG_HOME/autostart/org.fcitx.Fcitx5.desktop"
@@ -415,7 +416,7 @@ t_edited_after_install() {
   cp "$HOME/.xinputrc" "$T8_SANDBOX/pre.xinputrc"
   check "install exits 0" run_install
   printf 'run_im fcitx5\n# my edit\n' >"$HOME/.xinputrc"
-  printf 'QT_IM_MODULE=fcitx\n' >"$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf"
+  printf 'QT_IM_MODULE=user-edit\n' >"$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf"
   gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('ibus', 'vr-talex'), ('xkb', 'fr')]"
   gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'fr'), ('ibus', 'vr-talex'), ('xkb', 'us')]"
   local out rc=0 saved
@@ -428,7 +429,7 @@ t_edited_after_install() {
   check "warning names the kept ~/.xinputrc" grep -qF "$saved" <<<"$out"
   check "environment.d file that install created is gone" [ ! -e "$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf" ]
   saved=$(saved_copy "$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf")
-  check "user's edited environment.d file kept aside" sh -c "[ -n '$saved' ] && grep -qx 'QT_IM_MODULE=fcitx' '$saved'"
+  check "user's edited environment.d file kept aside" sh -c "[ -n '$saved' ] && grep -qx 'QT_IM_MODULE=user-edit' '$saved'"
   check "kept copy is not a .conf (environment.d ignores it)" sh -c "case '$saved' in *.conf) exit 1;; esac"
   check "warning names the kept environment.d file" grep -qF "$saved" <<<"$out"
   check "source added after install kept, vr-talex removed" [ "$(gs sources)" = "[('xkb', 'us'), ('xkb', 'fr')]" ]
