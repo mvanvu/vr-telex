@@ -1,0 +1,477 @@
+//! The IBus protocol as GNOME Shell 46 uses it (spike T1, Q3), end to end
+//! over the private socket: AC-2 ordering, AC-3 commits, AC-4 indicator.
+
+mod common;
+
+use std::time::Duration;
+
+use common::*;
+use ime_core::Mode;
+use zbus::Variant;
+
+const QUIET: Duration = Duration::from_millis(150);
+
+fn panel(member: &str, symbol: &str) -> Seen {
+    Seen::Panel(member.to_owned(), symbol.to_owned())
+}
+
+#[test]
+fn the_call_sequence_of_gnome_shell_ends_in_a_typed_word() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.client().await;
+
+        // Bus level.
+        let hello = shell.bus("Hello", &()).await.ok();
+        let (name,): (String,) = hello.reply.body().deserialize().unwrap();
+        assert!(name.starts_with(":1."));
+        assert_eq!(
+            shell.unasked(QUIET).await,
+            [Seen::Other("NameAcquired".into())]
+        );
+        let rule = "type='signal',sender='org.freedesktop.DBus',member='NameOwnerChanged'";
+        shell.bus("AddMatch", &(rule,)).await.ok();
+        let owner = shell.bus("GetNameOwner", &(IBUS,)).await.ok();
+        let (owner,): (String,) = owner.reply.body().deserialize().unwrap();
+        assert_eq!(owner, ":1.0");
+        let panel_name = shell.bus("RequestName", &(PANEL, 2u32)).await.ok();
+        let (granted,): (u32,) = panel_name.reply.body().deserialize().unwrap();
+        assert_eq!(granted, 1);
+        let owner = shell.bus("GetNameOwner", &(PANEL,)).await.ok();
+        let (owner,): (String,) = owner.reply.body().deserialize().unwrap();
+        assert_eq!(owner, name);
+
+        // The IBus service.
+        let path = shell.create_context().await;
+        assert!(path.starts_with("/org/freedesktop/IBus/InputContext_"));
+        let engines = shell
+            .call(IBUS, IBUS_PATH, PROPERTIES, "Get", &(IBUS, "Engines"))
+            .await
+            .ok();
+        let body = engines.reply.body();
+        let (engines,): (Variant<'_>,) = body.deserialize().unwrap();
+        assert_eq!(engines.value_signature().to_string(), "av");
+        let Variant::Array(engines) = engines else {
+            panic!("not an array");
+        };
+        assert_eq!(engines.len(), 1);
+        let Variant::Variant(desc) = &engines[0] else {
+            panic!("not a variant");
+        };
+        assert_eq!(
+            desc.value_signature().to_string(),
+            "(sa{sv}ssssssssussssssss)"
+        );
+
+        let global = shell
+            .call(IBUS, IBUS_PATH, PROPERTIES, "Get", &(IBUS, "GlobalEngine"))
+            .await
+            .ok();
+        let body = global.reply.body();
+        let (global,): (Variant<'_>,) = body.deserialize().unwrap();
+        assert_eq!(global.value_signature().to_string(), "v");
+
+        // An engine is always active: its properties follow the answer.
+        assert_eq!(
+            shell.unasked(QUIET).await.last(),
+            Some(&panel("RegisterProperties", "VI"))
+        );
+
+        let set = shell.ibus("SetGlobalEngine", &("vr-talex",)).await.ok();
+        assert_eq!(set.before, [], "the reply comes first");
+        assert_eq!(
+            shell.unasked(QUIET).await,
+            [
+                Seen::Other("GlobalEngineChanged".into()),
+                panel("RegisterProperties", "VI"),
+            ]
+        );
+
+        // The input context.
+        let all = shell
+            .call(IBUS, &path, PROPERTIES, "GetAll", &(CONTEXT,))
+            .await
+            .ok();
+        assert_eq!(all.reply.body().signature().to_string(), "a{sv}");
+        shell.set(&path, "ClientCommitPreedit", (true,)).await.ok();
+        shell
+            .context(&path, "SetCapabilities", &(41u32,))
+            .await
+            .ok();
+        shell.set(&path, "ContentType", (10u32, 0u32)).await.ok();
+        shell.context(&path, "FocusIn", &()).await.ok();
+        shell
+            .context(&path, "SetCursorLocation", &(1i32, 2i32, 3i32, 4i32))
+            .await
+            .ok();
+        shell.unasked(QUIET).await;
+
+        let mut shown = Vec::new();
+        for letter in "vieetj".chars() {
+            let answer = shell.tap(&path, letter as u32).await;
+            assert!(answer.handled());
+            // The cursor rectangle follows each preedit and ends no word.
+            shell
+                .context(&path, "SetCursorLocation", &(1i32, 2i32, 3i32, 4i32))
+                .await
+                .ok();
+            shown.extend(answer.before);
+        }
+        assert_eq!(
+            shown,
+            ["v", "vi", "vie", "viê", "viêt", "việt"].map(preedit)
+        );
+
+        // The word ends: the commit is written before the reply that sends
+        // the space on to the application.
+        let space = shell.key(&path, KEY_SPACE, 0).await;
+        assert!(!space.handled());
+        assert_eq!(space.before, [Seen::Commit("việt".into()), hidden(Some(0))]);
+        assert_eq!(shell.unasked(QUIET).await, []);
+    });
+}
+
+#[test]
+fn keys_sent_without_waiting_are_answered_in_order() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        let path = shell.shell_context().await;
+        shell.unasked(QUIET).await;
+
+        // Press and release of each key back to back, a whole word and the
+        // space after it, before reading a single reply (spike Q3, B2).
+        let mut serials = Vec::new();
+        for keysym in "tieesng".chars().map(|c| c as u32).chain([KEY_SPACE]) {
+            for state in [0, RELEASE] {
+                let call = (keysym, 0u32, state);
+                serials.push(
+                    shell
+                        .send(IBUS, &path, CONTEXT, "ProcessKeyEvent", &call)
+                        .await,
+                );
+            }
+        }
+        let mut handled = Vec::new();
+        let mut written = Vec::new();
+        for serial in serials {
+            let answer = shell.answer(serial).await;
+            handled.push(answer.handled());
+            written.push(answer.before);
+        }
+        // Presses of letters are handled, releases and the space are not.
+        let expected: Vec<bool> = (0..16).map(|at| at % 2 == 0 && at < 14).collect();
+        assert_eq!(handled, expected);
+        let texts = ["t", "ti", "tie", "tiê", "tiế", "tiến", "tiếng"];
+        for (at, text) in texts.iter().enumerate() {
+            assert_eq!(written[at * 2], [preedit(text)]);
+            assert_eq!(written[at * 2 + 1], []);
+        }
+        assert_eq!(written[14], [Seen::Commit("tiếng".into()), hidden(Some(0))]);
+        assert_eq!(written[15], []);
+    });
+}
+
+#[test]
+fn a_ctrl_shift_tap_updates_the_indicator_and_commits_the_word() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        shell.bus("RequestName", &(PANEL, 2u32)).await.ok();
+        let path = shell.shell_context().await;
+        shell.unasked(QUIET).await;
+
+        shell.type_letters(&path, "vieet").await;
+        let mut caused = shell.tap_ctrl_shift(&path).await;
+        caused.extend(shell.unasked(QUIET).await);
+        assert_eq!(
+            caused,
+            [
+                Seen::Commit("viêt".into()),
+                hidden(Some(0)),
+                panel("UpdateProperty", "EN"),
+            ]
+        );
+        assert_eq!(bus.ime.mode(), Mode::En);
+
+        // English: keys pass untouched.
+        assert!(!shell.tap(&path, 'a' as u32).await.handled());
+
+        let mut caused = shell.tap_ctrl_shift(&path).await;
+        caused.extend(shell.unasked(QUIET).await);
+        assert_eq!(caused, [panel("UpdateProperty", "VI")]);
+    });
+}
+
+#[test]
+fn ctrl_shift_with_another_key_does_not_toggle() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        shell.bus("RequestName", &(PANEL, 2u32)).await.ok();
+        let path = shell.shell_context().await;
+        shell.unasked(QUIET).await;
+
+        // Ctrl+Shift+T.
+        for (keysym, state) in [
+            (KEY_CONTROL_L, 0),
+            (KEY_SHIFT_L, CONTROL),
+            ('T' as u32, CONTROL | SHIFT),
+            ('T' as u32, CONTROL | SHIFT | RELEASE),
+            (KEY_SHIFT_L, CONTROL | SHIFT | RELEASE),
+            (KEY_CONTROL_L, CONTROL | RELEASE),
+        ] {
+            let answer = shell.key(&path, keysym, state).await;
+            assert!(!answer.handled(), "the shortcut reaches the application");
+            assert_eq!(answer.before, []);
+        }
+        assert_eq!(shell.unasked(QUIET).await, []);
+        assert_eq!(bus.ime.mode(), Mode::Vi);
+    });
+}
+
+#[test]
+fn a_toggle_made_through_another_frontend_reaches_the_panel() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        shell.bus("RequestName", &(PANEL, 2u32)).await.ok();
+        shell.unasked(QUIET).await;
+
+        // A context of another frontend (fe-fcitx) toggles the global mode.
+        let other = bus.ime.create_context();
+        use ime_core::{KeyEvent, Mods, keysym};
+        for event in [
+            KeyEvent::press(keysym::CONTROL_L, Mods::NONE),
+            KeyEvent::press(keysym::SHIFT_L, Mods::CONTROL),
+            KeyEvent::release(keysym::SHIFT_L, Mods::CONTROL | Mods::SHIFT),
+            KeyEvent::release(keysym::CONTROL_L, Mods::CONTROL),
+        ] {
+            bus.ime.process_key(other, event);
+        }
+        assert_eq!(bus.ime.mode(), Mode::En);
+        assert_eq!(shell.unasked(QUIET).await, [panel("UpdateProperty", "EN")]);
+    });
+}
+
+#[test]
+fn focus_out_and_reset_leave_the_commit_to_a_client_that_commits_its_preedit() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        let path = shell.shell_context().await;
+        shell.unasked(QUIET).await;
+
+        // AC-3: GNOME Shell commits the preedit it shows when the field
+        // loses focus (the preedit was sent in "commit" mode). A second
+        // CommitText would double the word.
+        for leave in ["FocusOut", "Reset"] {
+            let last = shell.type_letters(&path, "vieet").await;
+            assert_eq!(last, [preedit("viêt")]);
+            let answer = shell.context(&path, leave, &()).await.ok();
+            assert_eq!(answer.before, [hidden(Some(0))], "{leave}");
+
+            // The word is gone from the engine: the next one starts afresh.
+            shell.context(&path, "FocusIn", &()).await.ok();
+            let last = shell.type_letters(&path, "as").await;
+            assert_eq!(last, [preedit("á")], "{leave}");
+            let space = shell.key(&path, KEY_SPACE, 0).await;
+            assert_eq!(space.before, [Seen::Commit("á".into()), hidden(Some(0))]);
+        }
+        // Nothing to commit: nothing is written at all.
+        let answer = shell.context(&path, "Reset", &()).await.ok();
+        assert_eq!(answer.before, []);
+    });
+}
+
+#[test]
+fn a_client_that_does_not_commit_its_preedit_gets_the_word_once() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut client = bus.greeted().await;
+        // No ClientCommitPreedit: a Qt 5 application.
+        let path = client.create_context().await;
+        client
+            .context(&path, "SetCapabilities", &(9u32,))
+            .await
+            .ok();
+        client.context(&path, "FocusIn", &()).await.ok();
+        let shown = Seen::Preedit {
+            text: "viêt".into(),
+            cursor: 4,
+            visible: true,
+            mode: None,
+        };
+
+        // Qt 5 moves focus or the cursor with `commit()`: it inserts the
+        // preedit it holds, then sends Reset. A CommitText would land a
+        // second copy in whatever has the focus by then (seen in a Qt 5
+        // QLineEdit, qa-artifacts/T5/qt5). The word only leaves the engine.
+        let last = client.type_letters(&path, "vieet").await;
+        assert_eq!(last, std::slice::from_ref(&shown));
+        let answer = client.context(&path, "Reset", &()).await.ok();
+        assert_eq!(answer.before, [hidden(None)]);
+        let last = client.type_letters(&path, "as").await;
+        assert_eq!(last[0], preedit_plain("á"), "the next word starts afresh");
+        client.context(&path, "Reset", &()).await.ok();
+
+        // A FocusOut that no Reset preceded still delivers the word.
+        let last = client.type_letters(&path, "vieet").await;
+        assert_eq!(last, [shown]);
+        let answer = client.context(&path, "FocusOut", &()).await.ok();
+        assert_eq!(answer.before, [Seen::Commit("viêt".into()), hidden(None)]);
+
+        // A held word was never shown: Reset sends it.
+        client.context(&path, "FocusIn", &()).await.ok();
+        client
+            .context(&path, "SetCapabilities", &(8u32,))
+            .await
+            .ok();
+        client.type_letters(&path, "as").await;
+        let answer = client.context(&path, "Reset", &()).await.ok();
+        assert_eq!(answer.before, [Seen::Commit("á".into())]);
+    });
+}
+
+/// A preedit sent without a focus mode, cursor at its end.
+fn preedit_plain(text: &str) -> Seen {
+    Seen::Preedit {
+        text: text.into(),
+        cursor: text.chars().count() as u32,
+        visible: true,
+        mode: None,
+    }
+}
+
+#[test]
+fn a_client_without_preedit_gets_the_word_at_the_boundary() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut client = bus.greeted().await;
+        let path = client.create_context().await;
+        // FOCUS only: neither preedit nor surrounding text (D10: hold).
+        client
+            .context(&path, "SetCapabilities", &(8u32,))
+            .await
+            .ok();
+        assert_eq!(client.type_letters(&path, "vieetj").await, []);
+        let space = client.key(&path, KEY_SPACE, 0).await;
+        assert!(!space.handled());
+        assert_eq!(space.before, [Seen::Commit("việt".into())]);
+
+        // Held words have no preedit the client could commit: FocusOut
+        // sends them even to a client that commits its own preedit.
+        client.set(&path, "ClientCommitPreedit", (true,)).await.ok();
+        client.type_letters(&path, "as").await;
+        let answer = client.context(&path, "FocusOut", &()).await.ok();
+        assert_eq!(answer.before, [Seen::Commit("á".into())]);
+    });
+}
+
+#[test]
+fn a_client_with_surrounding_text_only_gets_deletes_and_commits() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut client = bus.greeted().await;
+        let path = client.create_context().await;
+        client
+            .context(&path, "SetCapabilities", &(32u32,))
+            .await
+            .ok();
+        assert_eq!(
+            client.tap(&path, 'a' as u32).await.before,
+            [Seen::Commit("a".into())]
+        );
+        assert_eq!(
+            client.tap(&path, 's' as u32).await.before,
+            [Seen::Delete(-1, 1), Seen::Commit("á".into())]
+        );
+    });
+}
+
+#[test]
+fn password_fields_get_their_keys_untouched() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        let path = shell.shell_context().await;
+        shell.unasked(QUIET).await;
+
+        // (purpose, hints): password, PIN, and the private hint.
+        for content in [(8u32, 0u32), (9, 0), (0, 1 << 11)] {
+            shell.set(&path, "ContentType", content).await.ok();
+            for letter in "matkhau1s".chars() {
+                let answer = shell.tap(&path, letter as u32).await;
+                assert!(!answer.handled(), "{content:?}");
+                assert_eq!(answer.before, [], "{content:?}");
+            }
+            assert_eq!(shell.unasked(QUIET).await, []);
+        }
+    });
+}
+
+#[test]
+fn a_field_turning_into_a_password_field_commits_the_word_first() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        let path = shell.shell_context().await;
+        shell.unasked(QUIET).await;
+
+        shell.type_letters(&path, "vieet").await;
+        // SEC-13: the word typed so far belongs to the old field.
+        let answer = shell.set(&path, "ContentType", (8u32, 0u32)).await.ok();
+        assert_eq!(
+            answer.before,
+            [Seen::Commit("viêt".into()), hidden(Some(0))]
+        );
+        let key = shell.tap(&path, 's' as u32).await;
+        assert!(!key.handled());
+        assert_eq!(key.before, []);
+
+        // And back: composing works again.
+        shell.set(&path, "ContentType", (0u32, 0u32)).await.ok();
+        assert_eq!(shell.type_letters(&path, "as").await, [preedit("á")]);
+    });
+}
+
+#[test]
+fn a_destroyed_context_is_gone() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut client = bus.greeted().await;
+        let path = client.shell_context().await;
+        client.type_letters(&path, "a").await;
+        let destroyed = client.call(IBUS, &path, SERVICE, "Destroy", &()).await.ok();
+        assert_eq!(destroyed.before, []);
+        let key = client.key(&path, 'a' as u32, 0).await;
+        assert_eq!(
+            key.error().as_deref(),
+            Some("org.freedesktop.DBus.Error.UnknownObject")
+        );
+    });
+}
+
+#[test]
+fn several_clients_type_at_the_same_time_without_mixing() {
+    block_on(async {
+        let bus = Bus::start().await;
+        // D20: GNOME Shell plus applications with their own IBus client.
+        let mut shell = bus.greeted().await;
+        let mut qt = bus.greeted().await;
+        let shell_path = shell.shell_context().await;
+        let qt_path = qt.shell_context().await;
+        assert_ne!(shell_path, qt_path);
+        shell.unasked(QUIET).await;
+        qt.unasked(QUIET).await;
+
+        for (a, b) in "vieetj".chars().zip("dduowf".chars()) {
+            assert!(shell.tap(&shell_path, a as u32).await.handled());
+            assert!(qt.tap(&qt_path, b as u32).await.handled());
+        }
+        let space = shell.key(&shell_path, KEY_SPACE, 0).await;
+        assert_eq!(space.before, [Seen::Commit("việt".into()), hidden(Some(0))]);
+        let space = qt.key(&qt_path, KEY_SPACE, 0).await;
+        assert_eq!(space.before, [Seen::Commit("đườ".into()), hidden(Some(0))]);
+    });
+}
