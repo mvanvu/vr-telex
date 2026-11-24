@@ -8,6 +8,25 @@ publish.workspace = true
 
 [dependencies]
 ime-core.workspace = true
+# D-Bus wire protocol, SASL handshake and message types for the private bus.
+# No default features: no proxy/service macros, and no `tracing`, which would
+# let message contents reach a log (SEC-1). `bus-impl` gives the raw message
+# stream a bus needs; `p2p` the server side of a connection.
+zbus = { version = "6.5.0", default-features = false, features = ["tokio", "p2p", "bus-impl"] }
+# Listener, per-connection tasks, send and handshake deadlines.
+tokio = { workspace = true, features = ["net", "rt", "time", "sync", "io-util"] }
+# getuid for the peer check (SEC-8) without `unsafe`.
+rustix.workspace = true
+
+[features]
+# Test seams only; never enabled by the daemon. `serve_peers_of` admits
+# another user than the one running the bus (a test cannot connect as one).
+test-support = []
+
+[dev-dependencies]
+# The integration tests need the test seams of this crate.
+fe-ibus = { path = ".", features = ["test-support"] }
+tokio = { workspace = true, features = ["net", "rt", "time", "sync", "io-util"] }
 
 [lints]
 workspace = true
