@@ -5,7 +5,7 @@
            writes DIR/corpus.json (lines of typed segments), DIR/expected.txt, DIR/tokens.txt
   inject   [--corpus JSON --lines A:B [--enter]] [--text STR] [--keys SPEC...] [--delay S]
            types through Mutter RemoteDesktop on the current (isolated) session bus
-  cdp      PORTFILE list | eval URLPART JS
+  cdp      PORTFILE list | eval URLPART JS | navigate TAB URL | url TAB | ...
            Chrome DevTools: list page URLs, or evaluate JS in the first page whose URL contains URLPART
   diff     EXPECTED ACTUAL --label L --report FILE
            character-exact comparison; report lists the first mismatches with context
@@ -393,6 +393,19 @@ def cmd_cdp(a):
         for p in cdp_targets(pf)[1]:
             if p["id"] != keep:
                 cdp_http(pf, "/json/close/" + p["id"])
+    elif w == "navigate":
+        # A "typed" visit, as if entered in the address bar: it makes the URL an inline suggestion.
+        cdp_call(pf, a.args[0], "Page.navigate", {"url": a.args[1], "transitionType": "typed"})
+    elif w == "url":
+        # The tab's current URL (where the address bar sent it); a search as "search:<query>",
+        # because its other parameters change from one search to the next.
+        hist = cdp_call(pf, a.args[0], "Page.getNavigationHistory")
+        entries = hist.get("entries", [])
+        idx = hist.get("currentIndex", len(entries) - 1)
+        url = entries[idx].get("url", "") if 0 <= idx < len(entries) else ""
+        u = urllib.parse.urlsplit(url)
+        q = urllib.parse.parse_qs(u.query).get("q")
+        print(f"search:{q[0]}" if u.path.endswith("/search") and q else url)
     elif w == "history":
         # Each omnibox line became one search navigation; its q parameter is the text Chrome received.
         hist = cdp_call(pf, a.args[0], "Page.getNavigationHistory")
@@ -614,7 +627,8 @@ def main():
     i.add_argument("--delay", type=float, default=0.015)
     x = sub.add_parser("cdp")
     x.add_argument("portfile")
-    x.add_argument("what", choices=["list", "count", "eval", "new", "close", "activate", "close-others", "history"])
+    x.add_argument("what", choices=["list", "count", "eval", "new", "close", "activate", "close-others", "history",
+                                    "navigate", "url"])
     x.add_argument("args", nargs="*")
     f = sub.add_parser("diff")
     f.add_argument("expected")

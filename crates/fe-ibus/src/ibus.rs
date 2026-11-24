@@ -35,6 +35,9 @@ const PURPOSE_PIN: u32 = 9;
 /// `IBUS_INPUT_HINT_PRIVATE`: the client asks that nothing be remembered.
 const HINT_PRIVATE: u32 = 1 << 11;
 
+/// `IBUS_INPUT_PURPOSE_URL`: an address field.
+pub(crate) const PURPOSE_URL: u32 = 5;
+
 /// The release bit of the `ProcessKeyEvent` state.
 pub(crate) const RELEASE_MASK: u32 = 1 << 30;
 

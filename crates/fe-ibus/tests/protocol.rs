@@ -3,7 +3,7 @@
 
 mod common;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use common::*;
 use ime_core::Mode;
@@ -473,5 +473,117 @@ fn several_clients_type_at_the_same_time_without_mixing() {
         assert_eq!(space.before, [Seen::Commit("việt".into()), hidden(Some(0))]);
         let space = qt.key(&qt_path, KEY_SPACE, 0).await;
         assert_eq!(space.before, [Seen::Commit("đườ".into()), hidden(Some(0))]);
+    });
+}
+
+/// `IBUS_INPUT_PURPOSE_URL`.
+const PURPOSE_URL: u32 = 5;
+
+#[test]
+fn in_an_address_field_the_preedit_is_cleared_before_the_word_is_committed() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        let path = shell.shell_context().await;
+        shell
+            .set(&path, "ContentType", (PURPOSE_URL, 0u32))
+            .await
+            .ok();
+        shell.unasked(QUIET).await;
+
+        // Chrome deletes the inline completion of its address bar when the
+        // preedit changes in the same text-input `done` as the commit: the
+        // preedit has to be gone, in a `done` of its own, before the commit.
+        assert_eq!(shell.type_letters(&path, "git").await, [preedit("git")]);
+        let serial = shell
+            .send(
+                IBUS,
+                &path,
+                CONTEXT,
+                "ProcessKeyEvent",
+                &(KEY_RETURN, 0u32, 0u32),
+            )
+            .await;
+        let hide = shell.next(QUIET).await.expect("the preedit is cleared");
+        let cleared = Instant::now();
+        assert_eq!(seen(&hide), hidden(Some(0)));
+        let commit = shell.next(QUIET).await.expect("the word is committed");
+        let gap = cleared.elapsed();
+        assert_eq!(seen(&commit), Seen::Commit("git".into()));
+        assert!(gap >= Duration::from_millis(3), "committed after {gap:?}");
+        let enter = shell.answer(serial).await;
+        assert_eq!(enter.before, []);
+        assert!(!enter.handled(), "the key goes on to the address bar");
+
+        // Everywhere else the commit replaces the preedit in one step.
+        shell.set(&path, "ContentType", (0u32, 0u32)).await.ok();
+        shell.type_letters(&path, "git").await;
+        let enter = shell.key(&path, KEY_RETURN, 0).await;
+        assert_eq!(enter.before, [Seen::Commit("git".into()), hidden(Some(0))]);
+    });
+}
+
+#[test]
+fn gnome_shell_never_gets_a_delete_surrounding_text() {
+    // Mutter 46 aborts (the whole session goes down) on a
+    // DeleteSurroundingText that does not fit the surrounding text it holds,
+    // and that text lags behind the keys.
+    const SURROUNDING_ONLY: u32 = 32;
+    async fn word_without_delete(client: &mut Client, path: &str) {
+        let mut all = Vec::new();
+        for letter in "as".chars() {
+            all.extend(client.tap(path, letter as u32).await.before);
+        }
+        all.extend(client.key(path, KEY_SPACE, 0).await.before);
+        assert_eq!(all, [Seen::Commit("á".into())]);
+    }
+    block_on(async {
+        // The connection that owns the panel is GNOME Shell.
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        shell.bus("RequestName", &(PANEL, 2u32)).await.ok();
+        let path = shell.create_context().await;
+        shell
+            .context(&path, "SetCapabilities", &(SURROUNDING_ONLY,))
+            .await
+            .ok();
+        shell.unasked(QUIET).await;
+        word_without_delete(&mut shell, &path).await;
+
+        // A context of its own preedit commits is one of GNOME Shell's too,
+        // whichever of the two settings comes first.
+        let mut client = bus.greeted().await;
+        let first = client.create_context().await;
+        client
+            .set(&first, "ClientCommitPreedit", (true,))
+            .await
+            .ok();
+        client
+            .context(&first, "SetCapabilities", &(SURROUNDING_ONLY,))
+            .await
+            .ok();
+        word_without_delete(&mut client, &first).await;
+        let second = client.create_context().await;
+        client
+            .context(&second, "SetCapabilities", &(SURROUNDING_ONLY,))
+            .await
+            .ok();
+        client
+            .set(&second, "ClientCommitPreedit", (true,))
+            .await
+            .ok();
+        word_without_delete(&mut client, &second).await;
+
+        // A context made before the connection became the panel.
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        let path = shell.create_context().await;
+        shell
+            .context(&path, "SetCapabilities", &(SURROUNDING_ONLY,))
+            .await
+            .ok();
+        shell.bus("RequestName", &(PANEL, 2u32)).await.ok();
+        shell.unasked(QUIET).await;
+        word_without_delete(&mut shell, &path).await;
     });
 }

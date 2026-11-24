@@ -36,6 +36,13 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// the application untouched, which is better than an input method that
 /// answers late.
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long after clearing the preedit of an address field its word is
+/// committed. Mutter sends the text-input `done` of the cleared preedit from
+/// an idle callback, normally well within a millisecond; a commit that
+/// arrives before it shares that `done`, and Chrome then drops its inline
+/// completion, which is no worse than committing without the gap. Short
+/// enough that the word is not seen to disappear.
+const ADDRESS_COMMIT_GAP: Duration = Duration::from_millis(5);
 
 const ERR_FAILED: &str = "org.freedesktop.DBus.Error.Failed";
 const ERR_INVALID_ARGS: &str = "org.freedesktop.DBus.Error.InvalidArgs";
@@ -154,10 +161,16 @@ struct Context {
 }
 
 impl Context {
-    fn caps(&self) -> Caps {
+    /// `shell`: the context belongs to GNOME Shell (`Session::is_shell`).
+    ///
+    /// The shell is never offered the surrounding-text way of editing,
+    /// whatever it declares: Mutter 46 aborts, and the desktop session with
+    /// it, on a `DeleteSurroundingText` that does not fit the surrounding
+    /// text it holds, and that text lags behind the keys.
+    fn caps(&self, shell: bool) -> Caps {
         Caps {
             preedit: self.capabilities & ibus::CAP_PREEDIT_TEXT != 0,
-            surrounding_text: self.capabilities & ibus::CAP_SURROUNDING_TEXT != 0,
+            surrounding_text: !shell && self.capabilities & ibus::CAP_SURROUNDING_TEXT != 0,
             password: ibus::is_private(self.purpose, self.hints),
         }
     }
@@ -295,6 +308,12 @@ impl Session {
         self.shared
             .panel()
             .is_some_and(|owner| owner.connection == self.id)
+    }
+
+    /// True when `context` is one of GNOME Shell's: the shell owns the panel
+    /// and is the client that commits its preedit itself.
+    fn is_shell(&self, context: &Context) -> bool {
+        context.client_commit || self.is_panel()
     }
 
     /// A call to the panel object GNOME Shell serves on this connection.
@@ -443,7 +462,13 @@ impl Session {
                 match claim {
                     Claim::Granted => {
                         self.reply(call, BUS_NAME, &(NAME_PRIMARY_OWNER,)).await?;
-                        self.name_acquired(PANEL_NAME).await
+                        self.name_acquired(PANEL_NAME).await?;
+                        // Contexts made before the claim are the shell's now.
+                        let numbers: Vec<u64> = self.contexts.keys().copied().collect();
+                        for number in numbers {
+                            self.apply_caps(number).await?;
+                        }
+                        Ok(())
                     }
                     Claim::AlreadyOwner => self.reply(call, BUS_NAME, &(NAME_ALREADY_OWNER,)).await,
                     Claim::Refused => self.reply(call, BUS_NAME, &(NAME_EXISTS,)).await,
@@ -725,6 +750,7 @@ impl Session {
                             return self.invalid(call, IBUS_UNIQUE).await;
                         };
                         context.client_commit = client_commit;
+                        self.apply_caps(number).await?;
                     }
                     _ => return self.invalid(call, IBUS_UNIQUE).await,
                 }
@@ -741,7 +767,8 @@ impl Session {
         let Some(context) = self.contexts.get(&number) else {
             return Ok(());
         };
-        let actions = self.shared.ime.set_caps(context.id, context.caps());
+        let caps = context.caps(self.is_shell(context));
+        let actions = self.shared.ime.set_caps(context.id, caps);
         self.emit(number, &actions, Cause::Engine).await
     }
 
@@ -764,6 +791,8 @@ impl Session {
             return Ok(());
         };
         let with_mode = context.client_commit;
+        let shell = self.is_shell(context);
+        let address = with_mode && context.purpose == ibus::PURPOSE_URL;
         let mut shown = context.preedit_shown;
         let skip_commit = shown
             && match cause {
@@ -778,10 +807,18 @@ impl Session {
         // lose or repeat text between the two when keys follow closely.
         // Commit first: the commit replaces the preedit in one step, and
         // the hide that follows only clears what the client still remembers.
+        //
+        // An address field (Chrome's address bar, through GNOME Shell) needs
+        // the opposite. Chrome works out its inline completion while it
+        // applies the commit, and deletes it again when the preedit changes
+        // in the same text-input `done`: the preedit has to be gone before,
+        // in a `done` of its own (`ADDRESS_COMMIT_GAP`). Enter then goes to
+        // the completed address and Tab accepts it, as without an IME.
         let mut plan: Vec<&Action> = Vec::with_capacity(actions.len());
         for action in actions {
             match (plan.last(), action) {
                 (Some(Action::HidePreedit), Action::Commit(_)) if skip_commit => {}
+                (Some(Action::HidePreedit), Action::Commit(_)) if address => plan.push(action),
                 (Some(Action::HidePreedit), Action::Commit(_)) => {
                     let hide = plan.pop();
                     plan.push(action);
@@ -793,7 +830,8 @@ impl Session {
 
         let path = context_path(number);
         let mut result = Ok(());
-        for action in plan {
+        let mut plan = plan.into_iter().peekable();
+        while let Some(action) = plan.next() {
             result = match action {
                 Action::UpdatePreedit { text, cursor } => {
                     shown = true;
@@ -802,8 +840,13 @@ impl Session {
                 }
                 Action::HidePreedit => {
                     shown = false;
-                    self.preedit(&path, ibus::text(""), 0, false, with_mode)
-                        .await
+                    let sent = self
+                        .preedit(&path, ibus::text(""), 0, false, with_mode)
+                        .await;
+                    if address && matches!(plan.peek(), Some(Action::Commit(_))) {
+                        tokio::time::sleep(ADDRESS_COMMIT_GAP).await;
+                    }
+                    sent
                 }
                 Action::Commit(text) => match ibus::text(text) {
                     Ok(text) => {
@@ -812,6 +855,10 @@ impl Session {
                     }
                     Err(_) => Err(Closed),
                 },
+                // Unreachable while `Context::caps` keeps the shell out of
+                // the surrounding-text way of editing; a wrong word is still
+                // better than a desktop session that goes down.
+                Action::DeleteSurrounding { .. } if shell => Ok(()),
                 Action::DeleteSurrounding { offset, chars } => {
                     self.signal(
                         &path,
