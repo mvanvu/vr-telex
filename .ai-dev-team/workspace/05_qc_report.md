@@ -223,3 +223,21 @@ Reading: GPU setting makes no difference (~1.6% loss either way, so not the GL r
 | SEC-1 | pass | leak scan 0 hits |
 | SEC-6 | pass | 0700/0600 |
 | SEC-8 | pass | 0600, pid, symlink refused |
+
+## Sign-off (tree master d9ea809) — QC_FAIL
+Artifacts: .ai-dev-team/workspace/qa-artifacts/SIGNOFF/. fcitx5 pid 6881 unchanged before/after. Host had foreign load (another project's flutter tests, load avg 5-8) during the later runs.
+| Item | Result | Evidence |
+|---|---|---|
+| build --release --locked | pass | 13 s |
+| cargo test --workspace --locked | pass | 170 passed, 0 failed (42 s) |
+| fmt --check / clippy -D warnings | pass | rc 0 / rc 0 (55 s) |
+| tests/install/run.sh | pass | 26 scenarios, 0 failed (44 s) |
+| AC-2 term/chrome/code x3, 27068 chars | pass | 0 lost/0 extra/0 replaced, 15.0-15.4 ms/key |
+| AC-2 omnibox x3 | run 1,3 pass; run 2 FAIL (pacing gate only: text lossless, chunk mean 16.2 ms); rerun 1 run also FAIL pacing only (16.0-16.6 ms chunks, text lossless) | e2e-full, e2e-omni-rerun |
+| AC-3/4/5/6/7 | pass | e2e-full results.txt |
+| AC-10 | INCOMPLETE by design (D24) | |
+| SEC-1 (full run) | pass, 60 tokens, 531 files, 0 hits | rerun-only SEC-1 hits were /tmp/flutter_tools.* .dill files of a foreign flutter process, false positive |
+| D30 code-term 30 ms x3 | FAIL: lost 0/14/6; rerun 17/1/2 | e2e-codeterm30, e2e-codeterm30b |
+| code-term 15 ms x1 | lost 82 (expected small losses) | e2e-codeterm15 |
+| fcitx route term 1000 words 15 ms | pass 5598/5598, 0 lost | e2e-fcitx |
+Unverified here: O1 real desktop, SEC-23 shellcheck, SEC-25/26 cargo-audit/deny.

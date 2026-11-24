@@ -32,7 +32,7 @@ phase0: paths ✓ · profile — (greenfield, Phase 1 after T2 scaffold) · stra
 parallel: T1 ∥ T2 ∥ T3 — files disjoint (T1 only team files; T3 only tests/golden + tools/golden-gen; T2 owns Cargo.lock — T3 adds no crate until T2 committed: generator is a standalone script, not a workspace member)
 parallel later: T5 ∥ T6 ∥ T7 each in its own worktree (shared compile unit + Cargo.lock); merge order T5 → T6 → T7. T8 ∥ T9 on main tree (files disjoint from crates/).
 waiting: none (T9 running; sign-off after T5, T6, T9)
-eta: ~01:45 (set 21:07, basis: T5 review+QC ~30 min → merge ~21:40 → full e2e sign-off ~2 h 50 min → fixes ~45 min; Phase 5 beside sign-off)
+eta: reached 04:06 (sign-off done)
 follow-up nits (T2 re-check, minor, not blocking): telex-core lib.rs:194-203 Undone→Viet resume can report Composing on unparsable letters (`tw n w <`); lib.rs:210 Raw-branch `keys` Vec not wiped (SEC-4 best effort) — to ride along the next telex-core change or go in the report.
 worktree: T10 → ../vr-talex-wt-T10 (branch t10-free-order, from 8bb3a65). T10a engine (opus) ∥ T10b golden (sonnet) in that worktree, files disjoint (src+rules.rs vs tests/golden + tools/golden-gen). Merge into master after T4 is committed; T4 does not touch crates/telex-core.
 parallel: T4 ∥ T8 ∥ T9 on main tree — files disjoint (crates/ime-core + main.rs / install.sh, uninstall.sh, packaging, tests/install / tests/e2e); T10 in its own worktree
@@ -49,3 +49,6 @@ worktree: FR-3 → ../vr-talex-wt-FR3 (branch fr3-codeterm from db5490a+docs)
 FR-3 ride-along: Phase 5 correctness #3 (fe-ibus missing display → silent no-IME) added to FR-3 at 00:05.
 FR-4: harness fixed (uncommitted, tests/e2e/install_scenario.sh); AC-5 rerun waits for FR-5. Live check 00:16: org.freedesktop.portal.IBus and org.fcitx.Fcitx5 both owned by pid 6881 (the user real fcitx5) → install would refuse on the target machine.
 follow-up nits (FR-4/6 review, minor): FR-6 stale-keyfile writer not captured in artifacts (cause "most likely", fix proven 10/10); install_scenario.sh stop() signals pid without checking the run tag — report.
+sign-off: started 00:55 on d9ea809 (qc sonnet). Phase 5 ran 23:58–00:08 on 62f5eca; its fixes FR-3..FR-6 are re-checked by their own reviews and by this sign-off.
+sign-off (04:06, d9ea809): QC_FAIL only on D30 (VS Code terminal, client limit pending the user) + harness items: omnibox pacing gate under load (text lossless), SEC-1 /tmp scan false positive from another project's files. Product ACs: AC-2 (term/chrome/omnibox/code/fcitx route) lossless, AC-3/4/5/6/7 PASS, SEC-1 0 hits on the full run, cargo 170 tests, installer suite 26/26. Gate decision: no new product fix task; harness nits listed in the report.
+follow-up nit (sign-off): tests/e2e SEC-1 leak scan scans all of /tmp — restrict to the run's own dirs.
