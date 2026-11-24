@@ -1,0 +1,5 @@
+# The installed stable toolchain is 1.100.0; naming "1.100.0" here would make rustup
+# download a second copy, so the exact version is pinned by `rust-version` in Cargo.toml.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

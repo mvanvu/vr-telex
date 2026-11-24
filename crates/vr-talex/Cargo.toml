@@ -1,0 +1,18 @@
+[package]
+name = "vr-talex"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ime-core.workspace = true
+fe-ibus.workspace = true
+fe-fcitx.workspace = true
+fe-xim.workspace = true
+# Only the runtime: frontends are async (zbus/x11rb event loops); no macros, no I/O drivers yet.
+tokio = { workspace = true, features = ["rt"] }
+
+[lints]
+workspace = true

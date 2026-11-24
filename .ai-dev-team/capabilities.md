@@ -1,0 +1,6 @@
+# Capabilities index (one line per reusable capability, repo-relative path)
+- Telex word composer `telex_core::Composer` (push/pop/text/raw/clear, Outcome; structural syllable validation, modern tone placement, raw restore, redacted Debug) — crates/telex-core/src/lib.rs (T2)
+- Frontend stub signature `pub async fn run(_ime: ime_core::SharedIme) -> ime_core::Result<()>` + `ime_core::{SharedIme, Error, Result}` placeholders — crates/ime-core/src/lib.rs, crates/fe-*/src/lib.rs (T2; T4–T7 replace)
+- Frontend wiring: current-thread tokio runtime + JoinSet over all frontends — crates/vr-talex/src/main.rs (T2)
+- Golden-list runner (keys<TAB>expected, reports every mismatch, skips if file missing) — crates/telex-core/tests/golden.rs (T2)
+- cargo-deny policy (crates.io only, no openssl/network crates) — deny.toml (T2)

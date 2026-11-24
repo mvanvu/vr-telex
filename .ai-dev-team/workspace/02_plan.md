@@ -37,7 +37,8 @@ impl Composer {
     pub fn new() -> Self;
     /// Feed one printable char (a-z, A-Z). Returns the full current word.
     pub fn push(&mut self, ch: char) -> Outcome;
-    /// Remove the last raw key (BackSpace inside a word).
+    /// BackSpace inside a word: removes the last shown character; right after a
+    /// tone key it removes that tone instead (T2 quick pass 1).
     pub fn pop(&mut self) -> Outcome;
     pub fn text(&self) -> &str;      // rendered word (Vietnamese or raw fallback)
     pub fn raw(&self) -> &str;       // keys as typed
