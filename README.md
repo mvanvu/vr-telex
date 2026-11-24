@@ -25,7 +25,7 @@ From the root of this checkout, as your own user (no `sudo`):
 The script builds the release binary, installs it to `~/.local/bin/vr-talex`, starts the
 `vr-talex.service` user unit, adds "Vietnamese (Telex)" to the GNOME input sources and
 selects it. It saves the previous setup first (input sources, fcitx5 state, the files it
-replaces) under `~/.local/share/vr-talex/backup/`. Running it again changes nothing.
+replaces) under `~/.local/share/vr-talex/backup/`. Running it again changes no file; it restarts the daemon so GNOME selects Vietnamese (Telex) again.
 If the daemon does not come up healthy, install rolls everything back and exits non-zero.
 
 It applies without logging out:

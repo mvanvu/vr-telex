@@ -9,7 +9,8 @@
 #   --words N            corpus size (default 5000)
 #   --seed N             corpus seed (default 20261124)
 #   --delay S            seconds between keys (default 0.015)
-#   --scenarios "LIST"   from: password toggle focus suggest install (default: all five)
+#   --scenarios "LIST"   from: password toggle focus focus-kept suggest indicator install
+#                        (default: password toggle focus focus-kept suggest install)
 #   --skip-install       skip the install/uninstall scenario (also skipped while install.sh is absent)
 #   --route ibus|fcitx   IM environment of the apps: Ubuntu default (ibus) or GTK_IM_MODULE=fcitx
 #   --out DIR            where run directories go (default target/e2e)
@@ -23,7 +24,7 @@ REPO="$(cd "$HERE/../.." && pwd)"
 . "$HERE/lib.sh"
 
 IME=daemon APPS="term chrome omnibox code code-term" RUNS=3 WORDS=5000 SEED=20261124 DELAY=0.015
-SCENARIOS="password toggle focus suggest install" SKIP_INSTALL=0 ROUTE=ibus OUT="$REPO/target/e2e"
+SCENARIOS="password toggle focus focus-kept suggest install" SKIP_INSTALL=0 ROUTE=ibus OUT="$REPO/target/e2e"
 ALLOW_INCOMPLETE=0 OMNI_CHUNK=40
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -360,6 +361,47 @@ for sc in $SCENARIOS; do
       [ "$after" -gt "$before" ] || ok=0
       detail="$(echo "$out" | tr '\n' ';') page saw Ctrl+Shift+[$klog]; pages $before -> $after after Ctrl+Shift+T"
       [ "$ok" = 1 ] && result AC-4 PASS "$detail" || result AC-4 FAIL "$detail";;
+    indicator)  # AC-4 as on the desktop: xkb layouts beside the engine, picked with the source switcher,
+      # and a toggle typed in a terminal (the --route path: IBus through the shell, or the fcitx D-Bus
+      # frontend) moves the indicator within 100 ms and switches what the terminal gets. D33: Ctrl+Space
+      # to the US layout turns the IME off for that route too (word in progress committed, keys raw,
+      # Ctrl+Shift inert); Ctrl+Space back turns it on in the kept mode.
+      [ "$IME" = daemon ] || { result AC-4:indicator SKIP "needs the daemon (source switch, D33)"; continue; }
+      gsettings set org.gnome.desktop.wm.keybindings switch-input-source "['<Control>space']"
+      gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('xkb', 'vn'), ('ibus', 'vr-talex')]"
+      pause 1
+      sh_eval "Main.panel.statusArea.keyboard._inputSourceManager.inputSources[2].activate(true); 1" >/dev/null
+      pause 1
+      echo "indicator: after picking the engine [$(sh_value "$IME_STATE")] $(sh_value "$SHELL_IME_JS")"
+      act="$OUTD/indicator-term.txt"; rm -f "$act"
+      gnome-terminal --wait -- bash -c "cat > '$act'" >>"$LOGS/terminal.log" 2>&1 &
+      pid=$!
+      wait_win gnome-terminal-server || { result AC-4:indicator FAIL "terminal window did not appear"; continue; }
+      ensure_vi
+      $E2E inject --text "vieetj " --delay "$DELAY" >/dev/null
+      out=$($E2E toggle-check --combo); echo "$out"
+      $E2E inject --keys TOGGLE >/dev/null; pause 0.3; ind1=$(sh_value "$IME_STATE")
+      $E2E inject --text "vieetj " --delay "$DELAY" >/dev/null
+      $E2E inject --keys TOGGLE >/dev/null; pause 0.3; ind2=$(sh_value "$IME_STATE")
+      # Ctrl+Space to the US layout, then raw typing and an inert Ctrl+Shift, in one input session:
+      # each injection ends with a focus-out of the field (its virtual keyboard goes away).
+      $E2E inject --text "vieetj " --delay "$DELAY" --keys down:Control_L space up:Control_L SLEEP:0.7 \
+        j space a a space TOGGLE SLEEP:0.3 >/dev/null
+      st4=$(sh_value "$IME_STATE"); off=$(sh_value "$SHELL_IME_JS")
+      $E2E inject --keys down:Control_L space up:Control_L >/dev/null; pause 0.7
+      st5=$(sh_value "$IME_STATE")
+      $E2E inject --text "dd " --delay "$DELAY" >/dev/null
+      echo "indicator: at the end $(sh_value "$SHELL_IME_JS")"
+      $E2E inject --keys Return down:Control_L d up:Control_L >/dev/null
+      wait_gone "$pid" 10 || echo "terminal did not exit after Ctrl+D"
+      got=$(cat "$act" 2>/dev/null); exp="$(golden_of vieetj) vieetj $(golden_of vieetj) j aa đ "
+      detail="route=$ROUTE; $(echo "$out" | head -1); indicator after typed toggles [$ind1, $ind2] expected [vr-talex|EN, vr-talex|VI]"
+      detail="$detail; after Ctrl+Space and a Ctrl+Shift there [$st4] ($off), Ctrl+Space back [$st5] expected [us|EN] (source-symbol=vi), [vr-talex|VI]"
+      detail="$detail; terminal got [$got] expected [$exp]"
+      if echo "$out" | grep -q '^toggle PASS' && [ "$ind1,$ind2" = vr-talex\|EN,vr-talex\|VI ] && [ "$got" = "$exp" ] \
+         && [ "$st4,$st5" = "us|EN,vr-talex|VI" ] && case "$off" in *engine=xkb:us::eng*source-symbol=vi) true;; *) false;; esac; then
+        result AC-4:indicator PASS "$detail"
+      else result AC-4:indicator FAIL "$detail"; fi;;
     focus)  # AC-3: a word in preedit is committed on window switch and on a click elsewhere
       [ "$IME" = none ] && { result AC-3 SKIP "no engine"; continue; }
       start_chrome || { result AC-3 FAIL "chrome did not start"; continue; }
@@ -438,6 +480,52 @@ for sc in $SCENARIOS; do
       n=$(( $(echo $SUGGEST_CASES $SUGGEST_VI_CASES | wc -w) ))
       [ "$ok" = 1 ] && result FR-8 PASS "$detail; $n cases, VI = EN / expected" \
                     || result FR-8 FAIL "$detail; $bad of $n cases differ";;
+    focus-kept)  # AC-3 with the keyboard kept through the focus change: a word in progress survives, once,
+      # a window switch out of Chrome, and in gnome-terminal (GTK3 im-wayland, committed by Mutter through the
+      # shell) a window switch, a click on another window and Ctrl+Space to the US layout. Each case runs
+      # inside one injection: ending an injection removes the headless seat's only keyboard, and GTK3 drops
+      # its preedit on that keyboard loss before Mutter's commit arrives (imwayland disable()), a path a
+      # desktop with a keyboard does not take (FR-10).
+      [ "$IME" = daemon ] || { result AC-3:kept SKIP "needs the daemon (Ctrl+Space source switch, D33)"; continue; }
+      start_chrome || { result AC-3:kept FAIL "chrome did not start"; continue; }
+      gsettings set org.gnome.desktop.wm.keybindings switch-input-source "['<Control>space']"
+      gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('ibus', 'vr-talex')]"
+      pause 1
+      sh_eval "Main.panel.statusArea.keyboard._inputSourceManager.inputSources[1].activate(true); 1" >/dev/null
+      pause 1
+      act="$OUTD/focus-kept-term.txt"; rm -f "$act"
+      gnome-terminal --wait -- bash -c "cat > '$act'" >>"$LOGS/terminal.log" 2>&1 &
+      pid=$!
+      wait_win gnome-terminal-server || { result AC-3:kept FAIL "terminal window did not appear"; continue; }
+      # Side by side, so a click can land on the other window.
+      place() { sh_eval "global.get_window_actors().map(a => a.meta_window).filter(w => w.get_wm_class() == '$1').forEach(w => { w.unmaximize(3); w.move_resize_frame(false, $2, 40, 620, 700); }); 1" >/dev/null; }
+      to() { echo "EVAL:global.get_window_actors().map(a => a.meta_window).filter(w => w.get_wm_class() == '$1').forEach(w => w.activate(global.get_current_time())); 1"; }
+      place gnome-terminal-server 0; place google-chrome 650; pause 0.5
+      w1=$(golden_of vieetj); w2=$(golden_of dduwowngf)
+      # Chrome: window switch to the terminal mid-word (the terminal must not get the word).
+      page_front; ensure_vi; page_eval "t.value=''; t.focus(); 1" >/dev/null
+      $E2E inject --text vieetj --delay "$DELAY" --keys "$(to gnome-terminal-server)" SLEEP:0.7 >/dev/null
+      gotc=$(page_eval "t.value")
+      # gnome-terminal: switch to Chrome and back, click on Chrome and switch back, Ctrl+Space to US (raw
+      # "aa" right after the word) and back. Chrome's field must stay empty.
+      page_eval "t.value=''; 1" >/dev/null
+      activate gnome-terminal-server; ensure_vi
+      $E2E inject --text vieetj --delay "$DELAY" --keys "$(to google-chrome)" SLEEP:0.7 "$(to gnome-terminal-server)" \
+        SLEEP:0.5 space >/dev/null
+      $E2E inject --text dduwowngf --delay "$DELAY" --keys click:960,400 SLEEP:0.7 "$(to gnome-terminal-server)" \
+        SLEEP:0.5 space >/dev/null
+      $E2E inject --text vieetj --delay "$DELAY" --keys down:Control_L space up:Control_L SLEEP:0.7 a a space \
+        down:Control_L space up:Control_L SLEEP:0.7 >/dev/null
+      st=$(sh_value "$IME_STATE"); other=$(page_eval "t.value")
+      $E2E inject --keys Return down:Control_L d up:Control_L >/dev/null
+      wait_gone "$pid" 10 || echo "terminal did not exit after Ctrl+D"
+      got=$(cat "$act" 2>/dev/null); exp="$w1 $w2 ${w1}aa "
+      gsettings set org.gnome.desktop.input-sources sources "$SRC"; pause 1
+      d1="chrome window switch: [$gotc] expected [$w1]"
+      d2="terminal (switch, click on another window, Ctrl+Space): [$got] expected [$exp]; chrome field meanwhile [$other] expected []; source after Ctrl+Space back [$st] expected [vr-talex|VI]"
+      [ "$gotc" = "$w1" ] && result AC-3:chrome-kept PASS "$d1" || result AC-3:chrome-kept FAIL "$d1"
+      if [ "$got" = "$exp" ] && [ -z "$other" ] && [ "$st" = "vr-talex|VI" ]; then result AC-3:term PASS "$d2"
+      else result AC-3:term FAIL "$d2"; fi;;
     install)  # AC-5 / AC-6: install-then-type and uninstall inside the sandbox
       if [ "$SKIP_INSTALL" = 1 ]; then result AC-5/AC-6 SKIP "--skip-install"; continue; fi
       if [ ! -x "$REPO/install.sh" ] || [ ! -x "$REPO/uninstall.sh" ]; then

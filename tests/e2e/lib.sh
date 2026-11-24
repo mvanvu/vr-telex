@@ -96,9 +96,13 @@ sh_value() { sh_eval "$1" | sed -E "s/^\(true, '\"?//; s/\"?'\)$//"; }
 # The panel keeps one label per input source; only the current source's label shows the engine mode.
 # Joining them all reads "en,VI" once an xkb layout sits beside vr-talex (after install), which never
 # equals "VI".
-CUR_LABEL_JS='(k => k._indicatorLabels?.[k._inputSourceManager?.currentSource?.index]?.text ?? "")(Main.panel.statusArea.keyboard)'
+# Upper-cased: the engine shows "vi"/"en" (D32), the stub "VI"/"EN"; checks compare with VI/EN.
+CUR_LABEL_JS='(k => k._indicatorLabels?.[k._inputSourceManager?.currentSource?.index]?.text ?? "")(Main.panel.statusArea.keyboard).toUpperCase()'
 IME_STATE="[Main.inputMethod._currentSource?.id ?? \"\", $CUR_LABEL_JS].join(\"|\")"
 indicator() { sh_value "$CUR_LABEL_JS"; }
+# What the shell knows of the engine, for the logs: the engine name it files property updates under and
+# the InputMode symbol it holds for the vr-talex source (null: no RegisterProperties taken).
+SHELL_IME_JS='(m => { const i = m._ibusManager; const p = m._ibusSources?.["vr-talex"]?.properties; let s = null; for (let n = 0, q; p && (q = p.get(n)); n++) if (q.get_key() === "InputMode") s = q.get_symbol()?.get_text(); return `shell: engine=${i._currentEngineName} waiting-for-properties=${i._registerPropertiesId !== 0} source-symbol=${s}`; })(Main.panel.statusArea.keyboard._inputSourceManager)'
 
 # wait_win <wm_class>: bounded wait (30 s) until a window of that class has a real size, then focus it.
 wait_win() {

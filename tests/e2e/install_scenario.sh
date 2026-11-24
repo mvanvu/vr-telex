@@ -69,10 +69,31 @@ EOF
 
 sources() { gsettings get org.gnome.desktop.input-sources sources; }
 
+# The running shell's current input source and its top-bar label, read from the input source
+# manager itself (D33: what the user sees, not what the settings say): "type:id|label".
+CUR_SRC_JS="(k => [(k._inputSourceManager?.currentSource?.type ?? '') + ':' + (k._inputSourceManager?.currentSource?.id ?? ''), $CUR_LABEL_JS].join('|'))(Main.panel.statusArea.keyboard)"
+cur_src() { sh_value "$CUR_SRC_JS"; }
+
+# Wait (up to 10 s) until the shell's current source is vr-talex with the indicator on vi; prints the
+# last state seen. Labels are compared case-insensitively (D32 made them lower case).
+wait_vr_selected() {
+  local i st=""
+  for i in $(seq 40); do
+    st=$(cur_src)
+    case "${st,,}" in "ibus:vr-talex|vi") break;; esac
+    pause 0.25
+  done
+  printf '%s' "$st"
+  case "${st,,}" in "ibus:vr-talex|vi") return 0;; esac
+  return 1
+}
+
 # footprint: hash of every file the installer may touch (apps' profiles excluded), plus the sources.
+# The IBus address files are left out: every daemon start rewrites them with its pid, and a re-run
+# restarts the daemon on purpose (D33).
 footprint() {
   (cd "$HOME" && find . -path ./chrome -prune -o -path ./code -prune -o -path ./code-ext -prune -o -path ./.cache -prune \
-     -o -type f -print0 | sort -z | xargs -0 sha256sum; sources) | sha256sum | cut -c1-16
+     -o -path ./.config/ibus/bus -prune -o -type f -print0 | sort -z | xargs -0 sha256sum; sources) | sha256sum | cut -c1-16
 }
 
 type_in_new_terminal() {  # type_in_new_terminal <keys> <out file>
@@ -113,6 +134,14 @@ install_scenario() {
   d5="install rc=$rc; engine connected to the shell [$st] ${ready} s after install returned (limit 5 s)"
   [ "$rc" = 0 ] || ok5=0
   case "$st" in vr-talex\|*) ;; *) ok5=0;; esac
+  # D33: the running shell's current source is Vietnamese (Telex) and the indicator shows vi.
+  local cur
+  if cur=$(wait_vr_selected); then d5="$d5; shell current source after install [$cur]"
+  else d5="$d5; shell current source after install [$cur] expected [ibus:vr-talex|vi]"; ok5=0; fi
+  # BASE-48 asks for the 'current' key too; GNOME 46 marks it "deprecated and ignored" and the shell
+  # never writes it, so it is recorded for the reader, not judged.
+  d5="$d5; gsettings current=$(gsettings get org.gnome.desktop.input-sources current 2>&1) (deprecated, not written by the shell)"
+  grep -qi selected "$LOGS/install-1.log" && { d5="$d5; install printed 'selected' (BASE-48)"; ok5=0; }
   python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) <= 5.0 else 1)' "$ready" || ok5=0
   local after; after=$(sources)
   local n; n=$(echo "$after" | grep -o "'vr-talex'" | wc -l)
@@ -130,11 +159,22 @@ install_scenario() {
     gotc=$(page_eval "t.value")
   fi
   d5="$d5; new Chrome typed [$gotc] expected [việt ]"; [ "$gotc" = "việt " ] || ok5=0
+  # D33, source already present: replay the live state FR-7 found — the shell on English (US) while
+  # mru-sources in the settings still starts with vr-talex (the shell keeps its MRU list in memory).
+  # The switch is made inside the throwaway shell only; install.sh itself never uses Eval.
+  sh_eval "Object.values(Main.panel.statusArea.keyboard._inputSourceManager.inputSources).find(s => s.type === 'xkb').activate(true); 1" >/dev/null
+  pause 0.5
+  local mru_set; mru_set=$(gsettings get org.gnome.desktop.input-sources mru-sources)
+  gsettings set org.gnome.desktop.input-sources mru-sources "[('ibus', 'vr-talex'), $(echo "$mru_set" | sed -E "s/^\[//; s/\]$//; s/\('ibus', 'vr-talex'\)(, )?//; s/, $//")]"
+  local pre2; pre2=$(cur_src)
   local fp1 fp2
   fp1=$(footprint)
   (cd "$REPO" && env "${tool_env[@]}" ./install.sh) >"$LOGS/install-2.log" 2>&1
   fp2=$(footprint)
   d5="$d5; second install changed files: $([ "$fp1" = "$fp2" ] && echo no || echo YES)"; [ "$fp1" = "$fp2" ] || ok5=0
+  if cur=$(wait_vr_selected); then d5="$d5; second install with the shell on [$pre2] -> current [$cur]"
+  else d5="$d5; second install with the shell on [$pre2] -> current [$cur] expected [ibus:vr-talex|vi]"; ok5=0; fi
+  d5="$d5; gsettings current=$(gsettings get org.gnome.desktop.input-sources current 2>&1)"
   [ "$ok5" = 1 ] && result AC-5 PASS "$d5" || result AC-5 FAIL "$d5"
 
   (cd "$REPO" && env "${tool_env[@]}" ./uninstall.sh) >"$LOGS/uninstall.log" 2>&1; rc=$?

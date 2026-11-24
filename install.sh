@@ -2,9 +2,10 @@
 # Install vr-talex for the current user (spec B7, decisions D1, D11, D20).
 #
 # User-level only: builds from this checkout, writes under $HOME, uses
-# systemctl --user and gsettings. Safe to run again: a second run changes
-# nothing. If the daemon does not come up healthy, every change is rolled
-# back and the input sources are left untouched (SEC-19).
+# systemctl --user and gsettings. Safe to run again: a second run changes no
+# file; it only restarts the daemon so the running shell selects Vietnamese
+# (Telex) again (D33). If the daemon does not come up healthy, every change
+# is rolled back, input sources included (SEC-19).
 #
 # Test seams: VR_TALEX_BIN (use this binary instead of building),
 # VR_TALEX_TIMEOUT (seconds to wait for fcitx5 / the daemon),
@@ -179,8 +180,10 @@ install_managed() {
 }
 
 install_files() {
-  CHANGED_BIN=0 CHANGED_UNIT=0
-  if install_managed "$SRC_BIN" "$BIN_DST" 0755; then CHANGED_BIN=1; fi
+  CHANGED_UNIT=0
+  # A running daemon is restarted on every run (start_daemon), so a new
+  # binary needs no flag of its own.
+  install_managed "$SRC_BIN" "$BIN_DST" 0755 || true
   if install_managed "$REPO/packaging/vr-talex.service" "$UNIT_DST" 0644; then CHANGED_UNIT=1; fi
   install_managed "$REPO/packaging/90-vr-talex.conf" "$ENV_DST" 0644 || true
   install_managed "$REPO/packaging/xinputrc" "$XINPUTRC" 0644 || true
@@ -220,12 +223,17 @@ hand_over_fcitx5() {
   if has_owner "$FCITX_NAME"; then die "$FCITX_NAME is still owned by another process"; fi
 }
 
+# A running gnome-shell keeps its MRU list of input sources in memory and
+# reads mru-sources again only when its IBus connection becomes ready
+# (keyboard.js _ibusReadyCallback, GNOME 46). So the daemon is (re)started
+# after select_source: the shell then connects, reads vr-talex at the head
+# of mru-sources and selects it. A running daemon is restarted even when
+# nothing changed, because whether the shell has another source current
+# cannot be read without Eval (D33).
 start_daemon() {
   if systemctl --user is-active --quiet "$UNIT"; then
-    if [ "$CHANGED_BIN$CHANGED_UNIT" != 00 ]; then
-      say "restarting vr-talex"
-      systemctl --user restart "$UNIT" || die "vr-talex did not restart (journalctl --user -u $UNIT)"
-    fi
+    say "restarting vr-talex"
+    systemctl --user restart "$UNIT" || die "vr-talex did not restart (journalctl --user -u $UNIT)"
     if ! systemctl --user is-enabled --quiet "$UNIT"; then
       systemctl --user enable "$UNIT" || die "could not enable $UNIT"
     fi
@@ -236,7 +244,8 @@ start_daemon() {
 }
 
 # Healthy = the unit's main process owns org.fcitx.Fcitx5 and has published
-# its IBus address file. Only then are the input sources touched (SEC-19).
+# its IBus address file. Not healthy -> die, and the rollback restores the
+# input sources select_source wrote (SEC-19).
 health_check() {
   local main mid f
   gdbus wait --session --timeout "$TIMEOUT" "$FCITX_NAME" >/dev/null 2>&1 ||
@@ -253,14 +262,19 @@ health_check() {
   die "vr-talex did not publish its IBus address in $IBUS_BUS_DIR"
 }
 
-# Add the Vietnamese source once and select it. An existing entry is left
-# alone, so a second run (or a user who switched back) changes nothing.
+# Add the Vietnamese source once and put it at the head of mru-sources,
+# before the daemon starts (see start_daemon). SEC-19 still holds: the
+# shell lists an IBus source only once a ready IBus bus lists its engine
+# (keyboard.js _inputSourcesChanged), so vr-talex cannot become current
+# while the daemon is not answering, and a failed health check rolls both
+# keys back exactly. An existing entry stays where it is; only mru-sources
+# is changed, when another source is at its head (D33).
 select_source() {
   local cur items mru sources
   cur=$(gs_get sources)
   case "$cur" in
     *"$VR_SOURCE"*)
-      say "input source already present"
+      reselect_source
       return 0
       ;;
     "[("*")]" | "@a(ss) []") ;;
@@ -280,7 +294,43 @@ select_source() {
   printf 'mru-sources\t%s\nsources\t%s\n' "$mru" "$sources" >"$BACKUP_DIR/installed.gs"
   gsettings set "$SCHEMA" mru-sources "$mru"
   gsettings set "$SCHEMA" sources "$sources"
-  say "added and selected the Vietnamese (Telex) input source"
+  say "added the Vietnamese (Telex) input source and put it first"
+}
+
+# The source is already there: move it to the head of mru-sources when
+# another source is first. installed.gs is never rewritten here: when only
+# vr-talex's place changed, the new value equals what the first install
+# recorded, so uninstall restores the saved value; when the user changed
+# the list since, it differs, and uninstall keeps the user's list minus
+# vr-talex (gs_restore).
+reselect_source() {
+  local cur rest mru
+  cur=$(gs_get mru-sources)
+  case "$cur" in
+    "[$VR_SOURCE"*)
+      say "input source already present and first"
+      return 0
+      ;;
+    "[("*")]" | "@a(ss) []") ;;
+    *) die "unexpected mru-sources value: $cur" ;;
+  esac
+  rest=$(list_items "$(without_vr "$cur")")
+  if [ -n "$rest" ]; then mru="[$VR_SOURCE, $rest]"; else mru="[$VR_SOURCE]"; fi
+  gsettings set "$SCHEMA" mru-sources "$mru"
+  say "put the Vietnamese (Telex) input source first again"
+}
+
+# The user's own input-source switch shortcut (D33: often Ctrl+Space, not
+# the Super+Space default), or a neutral name when it cannot be read.
+switch_shortcut() {
+  local v first
+  v=$(gsettings get org.gnome.desktop.wm.keybindings switch-input-source 2>/dev/null) || v=''
+  first=${v#"['"}
+  first=${first%%"'"*}
+  case "$v" in
+    "['"?*) printf 'the shortcut %s' "$(printf '%s' "$first" | tr -cd '[:print:]')" ;;
+    *) printf 'the input-source switch shortcut' ;;
+  esac
 }
 
 # Files of an install whose backup is gone: taking them as the "original"
@@ -307,11 +357,14 @@ main() {
   ROLLBACK=1
   install_files
   hand_over_fcitx5
+  select_source
   start_daemon
   health_check
-  select_source
   ROLLBACK=0
-  say "installed; Ctrl+Shift switches between Vietnamese and English"
+  # The shell's current source cannot be read back from here (no Eval), so
+  # this says what to look for instead of claiming it is selected (BASE-48).
+  say "installed; the top bar shows vi or en while Vietnamese (Telex) is the current source ($(switch_shortcut) switches sources)"
+  say "Ctrl+Shift switches between Vietnamese and English"
   print_recovery
 }
 

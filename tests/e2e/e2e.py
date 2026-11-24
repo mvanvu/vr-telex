@@ -213,12 +213,20 @@ class Injector:
         time.sleep(max(self.delay, 0.03))
 
     def spec(self, sp):
-        """TOGGLE | SLEEP:s | down:Key | up:Key | click:X,Y | Key (tap; a char or a NAMED key)."""
+        """TOGGLE | SLEEP:s | EVAL:js | down:Key | up:Key | click:X,Y | Key (tap; a char or a NAMED key)."""
         if sp == "TOGGLE":
             return self.toggle()
         kind, _, arg = sp.partition(":")
         if arg and kind == "SLEEP":
             return time.sleep(float(arg))
+        if arg and kind == "EVAL":
+            # Shell JS run inside the session (e.g. a window switch): the virtual keyboard stays, so the
+            # focus change is the only thing that happens to a word in progress. Ending the session
+            # instead removes the headless seat's only keyboard, and GTK3 im-wayland clients then drop
+            # the preedit before the compositor's commit reaches them.
+            if shell_eval(self.conn, arg) is None:
+                print(f"inject: EVAL failed: {arg}", file=sys.stderr)
+            return None
         if arg and kind in ("down", "up"):
             self.sym(spec_keysym(arg), kind == "down")
             time.sleep(0.02)
@@ -545,9 +553,9 @@ def cmd_latency(a):
 
 
 # The current source's label only (same expression as lib.sh CUR_LABEL_JS): with more than one source
-# the panel holds one label per source.
+# the panel holds one label per source. Upper-cased: the engine shows "vi"/"en" (D32), MODES are upper case.
 INDICATOR_JS = ('(k => k._indicatorLabels?.[k._inputSourceManager?.currentSource?.index]?.text ?? "")'
-                '(Main.panel.statusArea.keyboard)')
+                '(Main.panel.statusArea.keyboard).toUpperCase()')
 
 
 def shell_eval(conn, js):

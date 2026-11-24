@@ -25,7 +25,8 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// `VI` / `EN`: the indicator label and the content of the state file.
+    /// `VI` / `EN`: the content of the state file (the indicator text is the
+    /// frontend's).
     pub const fn symbol(self) -> &'static str {
         match self {
             Mode::Vi => "VI",
@@ -217,6 +218,9 @@ impl Context {
 /// The IME: one mode, many contexts. Wrap it in a [`crate::SharedIme`].
 pub struct Ime {
     mode: Mode,
+    /// Off while the desktop has another input source selected (D33): every
+    /// key passes untouched and the mode is kept for when it comes back.
+    enabled: bool,
     clock: Box<dyn Fn() -> Instant + Send>,
     mode_tx: watch::Sender<Mode>,
     contexts: HashMap<CtxId, Context>,
@@ -237,6 +241,7 @@ impl Ime {
         let mode = store.load();
         Self {
             mode,
+            enabled: true,
             clock,
             mode_tx: watch::Sender::new(mode),
             contexts: HashMap::new(),
@@ -328,6 +333,10 @@ impl Ime {
             handled: false,
             actions,
         };
+        if !self.enabled {
+            // Another input source is selected: not even Ctrl+Shift is looked at.
+            return pass(actions);
+        }
         let release = ev.released();
         let class = classify(ev.keysym);
 
@@ -411,6 +420,30 @@ impl Ime {
 
     pub fn mode(&self) -> Mode {
         self.mode
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Switches the IME off or on for every context (D33). Switching off ends
+    /// each word in progress: its commit waits in the context and leads that
+    /// context's next result, or comes with [`Ime::take_pending`],
+    /// [`Ime::focus_out`], [`Ime::reset`] or [`Ime::destroy_context`] (B3).
+    /// Either way a Ctrl+Shift tap under way is forgotten.
+    pub fn set_enabled(&mut self, on: bool) {
+        if self.enabled == on {
+            return;
+        }
+        self.enabled = on;
+        for ctx in self.contexts.values_mut() {
+            if !on {
+                let mut out = std::mem::take(&mut ctx.pending);
+                ctx.flush(&mut out);
+                ctx.pending = out;
+            }
+            ctx.tap.reset();
+        }
     }
 
     /// A watch that reports every mode change, for the indicator.

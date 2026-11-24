@@ -45,6 +45,19 @@ pub(crate) const RELEASE_MASK: u32 = 1 << 30;
 pub(crate) const PREEDIT_CLEAR: u32 = 0;
 pub(crate) const PREEDIT_COMMIT: u32 = 1;
 
+/// An IBus keyboard-layout engine as GNOME Shell names it for an xkb input
+/// source (`xkb:us::eng`, `xkb:de:nodeadkeys:ger`). The name is echoed back
+/// to the client, so it is bounded and plain.
+pub(crate) fn is_xkb_engine(name: &str) -> bool {
+    name.strip_prefix("xkb:").is_some_and(|rest| {
+        !rest.is_empty()
+            && name.len() <= 64
+            && rest
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b":_+-.".contains(&b))
+    })
+}
+
 /// True when the content type of a field says its text is secret.
 pub(crate) fn is_private(purpose: u32, hints: u32) -> bool {
     matches!(purpose, PURPOSE_PASSWORD | PURPOSE_PIN) || hints & HINT_PRIVATE != 0
@@ -141,7 +154,8 @@ pub(crate) fn engine_desc() -> zbus::Result<Variant<'static>> {
             .add_field("IBusEngineDesc")
             .add_field(attachments())
             .add_field(ENGINE_NAME)
-            .add_field("Vietnamese (Telex)") // longname
+            // GNOME Shell names the source "<language name> (<longname>)".
+            .add_field("Telex") // longname
             .add_field("Vietnamese Telex input method") // description
             .add_field("vi") // language
             .add_field("MIT") // license
@@ -150,7 +164,7 @@ pub(crate) fn engine_desc() -> zbus::Result<Variant<'static>> {
             .add_field("us") // layout
             .add_field(0u32) // rank
             .add_field("") // hotkeys
-            .add_field(Mode::Vi.symbol()) // symbol
+            .add_field(indicator_symbol(Mode::Vi)) // symbol
             .add_field("") // setup
             .add_field("") // layout_variant
             .add_field("") // layout_option
@@ -176,6 +190,15 @@ fn prop_list(props: Vec<Variant<'static>>) -> zbus::Result<Variant<'static>> {
     )
 }
 
+/// The top-bar text of a mode: lowercase like the shell's own layout labels
+/// ("en" for the US layout, D32). The state file keeps [`Mode::symbol`].
+pub(crate) const fn indicator_symbol(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Vi => "vi",
+        Mode::En => "en",
+    }
+}
+
 /// The `InputMode` `IBusProperty` `(sa{sv}suvsvbbuvv)`: GNOME Shell shows its
 /// symbol in the top bar (D6).
 pub(crate) fn mode_property(mode: Mode) -> zbus::Result<Variant<'static>> {
@@ -196,7 +219,7 @@ pub(crate) fn mode_property(mode: Mode) -> zbus::Result<Variant<'static>> {
             .add_field(true) // visible
             .add_field(0u32) // state: unchecked
             .append_field(boxed(prop_list(Vec::new())?)) // sub properties
-            .append_field(boxed(text(mode.symbol())?)) // symbol
+            .append_field(boxed(text(indicator_symbol(mode))?)) // symbol
             .build(),
     )
 }
@@ -277,15 +300,17 @@ mod tests {
         let fields = fields(&value);
         assert_eq!(string(&fields[0]), "IBusEngineDesc");
         assert_eq!(string(&fields[2]), "vr-talex");
-        assert_eq!(string(&fields[3]), "Vietnamese (Telex)");
+        // GNOME Shell names the source "<language name> (<longname>)" (ui/status/keyboard.js):
+        // language "vi" and longname "Telex" read "Vietnamese (Telex)".
+        assert_eq!(string(&fields[3]), "Telex");
         assert_eq!(string(&fields[5]), "vi");
         assert_eq!(string(&fields[9]), "us");
-        assert_eq!(string(&fields[12]), "VI");
+        assert_eq!(string(&fields[12]), "vi");
     }
 
     #[test]
     fn mode_property_carries_the_symbol_of_each_mode() {
-        for (mode, symbol) in [(Mode::Vi, "VI"), (Mode::En, "EN")] {
+        for (mode, symbol) in [(Mode::Vi, "vi"), (Mode::En, "en")] {
             let value = mode_property(mode).unwrap();
             assert_eq!(signature(&value), "(sa{sv}suvsvbbuvv)");
             let fields = fields(&value);

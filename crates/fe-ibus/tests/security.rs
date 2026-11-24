@@ -232,9 +232,12 @@ fn only_the_ibus_surface_is_served() {
             .await;
         assert_eq!(introspect.error().as_deref(), Some(UNKNOWN_METHOD));
 
-        // Only the one engine can be selected.
-        let engine = client.ibus("SetGlobalEngine", &("xkb:us::eng",)).await;
+        // Only the one engine can be selected; a layout (IME off, D33) only
+        // by the panel.
+        let engine = client.ibus("SetGlobalEngine", &("pinyin",)).await;
         assert_eq!(engine.error().as_deref(), Some(INVALID_ARGS));
+        let engine = client.ibus("SetGlobalEngine", &("xkb:us::eng",)).await;
+        assert_eq!(engine.error().as_deref(), Some(ACCESS_DENIED));
         // Only the panel name can be requested.
         let name = client.bus("RequestName", &(IBUS, 0u32)).await;
         assert_eq!(name.error().as_deref(), Some(ACCESS_DENIED));
@@ -486,7 +489,7 @@ fn the_panel_role_follows_the_documented_rule() {
         second.tap_ctrl_shift(&path).await;
         assert_eq!(
             second.unasked(QUIET).await,
-            [Seen::Panel("UpdateProperty".into(), "EN".into())]
+            [Seen::Panel("UpdateProperty".into(), "en".into())]
         );
         assert_eq!(first.unasked(QUIET).await, []);
 

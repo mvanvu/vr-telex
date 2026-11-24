@@ -17,10 +17,14 @@
 | FR-4 | e2e install scenario: systemctl shim runs quoted ExecStart and waits on stop (Phase 5 correctness #1, #2); then run AC-5/AC-6 end to end with the real daemon | be | - | - | AC-5, AC-6 | tests/e2e/install_scenario.sh | install scenario, real daemon | done | 0 |
 | FR-5 | Unit restart limits, uninstall stop order, README residual risks (Phase 5 correctness #4, #5; security #1 doc, #2) | be | - | security | AC-6, SEC-14, SEC-17, SEC-21 | packaging/vr-talex.service, packaging/common.sh, tests/install/run.sh, README.md | tests/install/run.sh | done | 0 |
 | FR-6 | Bug: (a) re-run of install.sh overwrites the first backup manifest (sources saved with vr-talex) so uninstall does not remove the source; (b) Chrome opened after install types raw in the AC-5 scenario | be | FR-5 committed | security | AC-5, AC-6, SEC-21 | install.sh, packaging/common.sh, tests/install/run.sh (+ whatever (b)'s root cause needs) | e2e install scenario + tests/install | done (harness-only) | 0 |
+| FR-7 | Bug (live desktop): Ctrl+Shift toggles the mode (text changes, mode file written) but the GNOME top-bar indicator does not change VI/EN | be | - | security | AC-4, D6 | crates/fe-ibus/** (per root cause) | live read-only observation + headless repro + fe-ibus tests | done | 1 |
+| FR-8 | Bug (live, user report): Chrome address bar with an inline suggestion — Enter loses typed letters instead of taking the suggestion; Tab does not accept the suggestion | be | - | security | AC-2, AC-3 | crates/ime-core/** and/or crates/fe-ibus/** (per root cause; worktree ../vr-talex-wt-FR8) | headless repro with seeded Chrome history | in-progress | 0 |
+| FR-9 | install.sh: leave Vietnamese (Telex) selected in the RUNNING shell (R2 from FR-7; the shell keeps its in-memory MRU) | be | - | security | AC-5, D33, SEC-19 | install.sh, packaging/common.sh, tests/install/run.sh, tests/e2e/install_scenario.sh | install suite + e2e install scenario | done | 0 |
+| FR-10 | Bug: a word in progress in gnome-terminal (GTK3 im-wayland via gnome-shell) is lost on FocusOut — window switch, Ctrl+Space popup (pre-existing, found by FR-7) | be | FR-7 merged | security | AC-3, B3 | crates/fe-ibus/** (per root cause) | e2e focus scenario in gnome-terminal | done (harness artifact; test pinned) | 0 |
 | REV-T10 | Review of the T10 revert (D28) | be | - | - | D28 | (review only) | cargo test telex-core, ime-core | done | 0 |
 
 ## Notes
-presence: present (user typed, 19:54)
+presence: present (user typed, 03:52)
 hand-off: ready (19:52)
 fable-policy: auto (user, 19:15) — Fable (case 3 high-risk + complex) for T4 (concurrency), T5 (protocol broker + security); case 2 (real-environment only) for T1
 commits: local, one per task, no push (user, 19:15)

@@ -259,6 +259,9 @@ impl Drop for Session {
         let mut panel = self.shared.panel();
         if panel.is_some_and(|owner| owner.connection == self.id) {
             *panel = None;
+            // Only the panel can switch the IME on again: without it the IME
+            // must not stay off. A shell that comes back sets its source anew.
+            self.shared.ime.set_enabled(true);
         }
     }
 }
@@ -485,6 +488,8 @@ impl Session {
                     match *panel {
                         Some(owner) if owner.connection == self.id => {
                             *panel = None;
+                            // As when the panel leaves: nobody could switch it on.
+                            self.shared.ime.set_enabled(true);
                             NAME_RELEASED
                         }
                         Some(_) => NAME_NOT_OWNER,
@@ -606,14 +611,46 @@ impl Session {
                 self.reply(call, IBUS_UNIQUE, &(object,)).await
             }
             (None | Some(IBUS_NAME), "SetGlobalEngine") => {
-                match body.deserialize::<(&str,)>() {
-                    Ok((ENGINE_NAME,)) => {}
-                    _ => return self.invalid(call, IBUS_UNIQUE).await,
+                let Ok((name,)) = body.deserialize::<(&str,)>() else {
+                    return self.invalid(call, IBUS_UNIQUE).await;
+                };
+                if name == ENGINE_NAME {
+                    // Selecting the engine is harmless from any client; only
+                    // the shell's choice turns the IME back on.
+                    if self.is_panel() {
+                        self.shared.ime.set_enabled(true);
+                    }
+                    self.reply(call, IBUS_UNIQUE, &()).await?;
+                    self.signal(IBUS_PATH, IBUS_NAME, "GlobalEngineChanged", &(ENGINE_NAME,))
+                        .await?;
+                    return self.register_properties().await;
+                }
+                if !ibus::is_xkb_engine(name) {
+                    return self.invalid(call, IBUS_UNIQUE).await;
+                }
+                // The shell's source switcher picked a keyboard layout (D33).
+                // Another client of the same user must not switch Vietnamese
+                // off for every application (SEC-10).
+                if !self.is_panel() {
+                    return self
+                        .error(call, IBUS_UNIQUE, ERR_ACCESS_DENIED, "Only the panel")
+                        .await;
+                }
+                let name = name.to_owned();
+                self.shared.ime.set_enabled(false);
+                // The words of this connection's fields are committed with the
+                // switch; those of other clients lead their next answer (B3).
+                let numbers: Vec<u64> = self.contexts.keys().copied().collect();
+                for number in numbers {
+                    let Some(id) = self.contexts.get(&number).map(|context| context.id) else {
+                        continue;
+                    };
+                    let actions = self.shared.ime.take_pending(id);
+                    self.emit(number, &actions, Cause::Engine).await?;
                 }
                 self.reply(call, IBUS_UNIQUE, &()).await?;
-                self.signal(IBUS_PATH, IBUS_NAME, "GlobalEngineChanged", &(ENGINE_NAME,))
-                    .await?;
-                self.register_properties().await
+                self.signal(IBUS_PATH, IBUS_NAME, "GlobalEngineChanged", &(name,))
+                    .await
             }
             (None | Some(IBUS_NAME), "GetGlobalEngine") => {
                 let desc = ibus::engine_desc().map_err(|_| Closed)?;

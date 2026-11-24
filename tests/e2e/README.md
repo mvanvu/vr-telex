@@ -32,9 +32,18 @@ Through the team's wrapper: `$TEAM_BIN/run-heavy.sh bash tests/e2e/run.sh --smok
 
 Options: `--ime stub|daemon|none`, `--apps "term chrome omnibox code code-term"`, `--runs N`,
 `--words N`, `--seed N`, `--delay S` (default 0.015 s per key), `--scenarios "password toggle focus
-install"`, `--skip-install`, `--route ibus|fcitx` (Ubuntu default env, or `GTK_IM_MODULE=fcitx` so
+focus-kept install"` (also `indicator`), `--skip-install`, `--route ibus|fcitx` (Ubuntu default env, or `GTK_IM_MODULE=fcitx` so
 gnome-terminal takes the fcitx D-Bus route), `--out DIR` (default `target/e2e`), `--omnibox-chunk N`
 (corpus lines per address-bar tab, default 40), `--allow-incomplete`.
+
+Focus changes and the end of an injection: each `e2e.py inject` is one RemoteDesktop session, and its
+virtual keyboard is the headless seat's only keyboard. When the injection ends the seat loses its
+keyboard, GTK3 apps (gnome-terminal) turn their text input off and drop their preedit, and the commit
+Mutter sends right after is ignored (GTK 3.24 `modules/input/imwayland.c`, `disable()`). A desktop with
+a keyboard never takes that path, so a case that leaves a word in progress must do its focus change
+inside the same injection: `--keys` takes `EVAL:<shell JS>` for a window switch, besides `click:X,Y`
+and `down:`/`up:` for Ctrl+Space. `focus-kept` (daemon only) checks AC-3 that way: a Chrome window
+switch, and in gnome-terminal a window switch, a click on another window and Ctrl+Space to the US layout.
 
 Key pacing: keys go out on a fixed 15 ms schedule (the D-Bus call cost is absorbed, not added). Every
 injection reports its measured mean ms/key; an AC-2 check fails when the mean is above the delay + 1 ms.

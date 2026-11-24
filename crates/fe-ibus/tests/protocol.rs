@@ -74,7 +74,7 @@ fn the_call_sequence_of_gnome_shell_ends_in_a_typed_word() {
         // An engine is always active: its properties follow the answer.
         assert_eq!(
             shell.unasked(QUIET).await.last(),
-            Some(&panel("RegisterProperties", "VI"))
+            Some(&panel("RegisterProperties", "vi"))
         );
 
         let set = shell.ibus("SetGlobalEngine", &("vr-talex",)).await.ok();
@@ -83,7 +83,7 @@ fn the_call_sequence_of_gnome_shell_ends_in_a_typed_word() {
             shell.unasked(QUIET).await,
             [
                 Seen::Other("GlobalEngineChanged".into()),
-                panel("RegisterProperties", "VI"),
+                panel("RegisterProperties", "vi"),
             ]
         );
 
@@ -189,7 +189,7 @@ fn a_ctrl_shift_tap_updates_the_indicator_and_commits_the_word() {
             [
                 Seen::Commit("viêt".into()),
                 hidden(Some(0)),
-                panel("UpdateProperty", "EN"),
+                panel("UpdateProperty", "en"),
             ]
         );
         assert_eq!(bus.ime.mode(), Mode::En);
@@ -199,7 +199,7 @@ fn a_ctrl_shift_tap_updates_the_indicator_and_commits_the_word() {
 
         let mut caused = shell.tap_ctrl_shift(&path).await;
         caused.extend(shell.unasked(QUIET).await);
-        assert_eq!(caused, [panel("UpdateProperty", "VI")]);
+        assert_eq!(caused, [panel("UpdateProperty", "vi")]);
     });
 }
 
@@ -250,7 +250,7 @@ fn a_toggle_made_through_another_frontend_reaches_the_panel() {
             bus.ime.process_key(other, event);
         }
         assert_eq!(bus.ime.mode(), Mode::En);
-        assert_eq!(shell.unasked(QUIET).await, [panel("UpdateProperty", "EN")]);
+        assert_eq!(shell.unasked(QUIET).await, [panel("UpdateProperty", "en")]);
     });
 }
 
@@ -281,6 +281,43 @@ fn focus_out_and_reset_leave_the_commit_to_a_client_that_commits_its_preedit() {
         // Nothing to commit: nothing is written at all.
         let answer = shell.context(&path, "Reset", &()).await.ok();
         assert_eq!(answer.before, []);
+    });
+}
+
+#[test]
+fn gnome_shells_focus_out_in_a_terminal_leaves_the_word_to_the_compositor() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        let path = shell.shell_context().await;
+        shell.unasked(QUIET).await;
+        // gnome-terminal through the shell: purpose TERMINAL.
+        shell.set(&path, "ContentType", (10u32, 0u32)).await.ok();
+        let last = shell.type_letters(&path, "vieet").await;
+        // "Commit" mode: Mutter keeps this preedit and commits it itself
+        // when the text-input focus moves (clutter_input_focus_reset),
+        // before the shell's focus-out reaches the engine.
+        assert_eq!(last, [preedit("viêt")]);
+
+        // inputMethod.js `vfunc_focus_out`: `_fullReset` (content type
+        // cleared, cursor cleared, Reset), then FocusOut. A CommitText in
+        // any of these answers would come after Mutter's commit.
+        let content = shell.set(&path, "ContentType", (0u32, 0u32)).await.ok();
+        assert_eq!(content.before, []);
+        let cursor = shell
+            .context(&path, "SetCursorLocation", &(0i32, 0i32, 0i32, 0i32))
+            .await
+            .ok();
+        assert_eq!(cursor.before, []);
+        let reset = shell.context(&path, "Reset", &()).await.ok();
+        assert_eq!(reset.before, [hidden(Some(0))]);
+        let focus_out = shell.context(&path, "FocusOut", &()).await.ok();
+        assert_eq!(focus_out.before, []);
+
+        // The word ended there: the next one starts afresh.
+        shell.context(&path, "FocusIn", &()).await.ok();
+        let last = shell.type_letters(&path, "as").await;
+        assert_eq!(last, [preedit("á")]);
     });
 }
 
@@ -585,5 +622,172 @@ fn gnome_shell_never_gets_a_delete_surrounding_text() {
         shell.bus("RequestName", &(PANEL, 2u32)).await.ok();
         shell.unasked(QUIET).await;
         word_without_delete(&mut shell, &path).await;
+    });
+}
+
+const ACCESS_DENIED: &str = "org.freedesktop.DBus.Error.AccessDenied";
+const INVALID_ARGS: &str = "org.freedesktop.DBus.Error.InvalidArgs";
+
+#[test]
+fn an_xkb_source_switches_the_ime_off_and_the_engine_back_on() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        shell.bus("RequestName", &(PANEL, 2u32)).await.ok();
+        let path = shell.shell_context().await;
+        shell.unasked(QUIET).await;
+
+        // The user picks the US layout with a word in progress: the word is
+        // committed with the switch (D33, B3).
+        shell.type_letters(&path, "vieet").await;
+        let off = shell.ibus("SetGlobalEngine", &("xkb:us::eng",)).await.ok();
+        assert_eq!(off.before, [Seen::Commit("viêt".into()), hidden(Some(0))]);
+        assert_eq!(
+            shell.unasked(QUIET).await,
+            [Seen::Other("GlobalEngineChanged".into())]
+        );
+        assert!(!bus.ime.enabled());
+
+        // Off: keys pass raw and Ctrl+Shift neither toggles nor touches the indicator.
+        let j = shell.tap(&path, 'j' as u32).await;
+        assert!(!j.handled());
+        assert_eq!(j.before, []);
+        let mut caused = shell.tap_ctrl_shift(&path).await;
+        caused.extend(shell.unasked(QUIET).await);
+        assert_eq!(caused, []);
+        assert_eq!(bus.ime.mode(), Mode::Vi);
+
+        // Back to the engine: on again in the kept mode, shown in the indicator.
+        shell.ibus("SetGlobalEngine", &("vr-talex",)).await.ok();
+        assert_eq!(
+            shell.unasked(QUIET).await,
+            [
+                Seen::Other("GlobalEngineChanged".into()),
+                panel("RegisterProperties", "vi"),
+            ]
+        );
+        assert!(bus.ime.enabled());
+        shell.type_letters(&path, "dd").await;
+        let mut caused = shell.tap_ctrl_shift(&path).await;
+        caused.extend(shell.unasked(QUIET).await);
+        assert_eq!(
+            caused,
+            [
+                Seen::Commit("đ".into()),
+                hidden(Some(0)),
+                panel("UpdateProperty", "en"),
+            ]
+        );
+    });
+}
+
+#[test]
+fn only_the_panel_switches_the_ime_off() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        shell.bus("RequestName", &(PANEL, 2u32)).await.ok();
+        let mut app = bus.greeted().await;
+
+        // Another client of the same user cannot turn Vietnamese off for all (SEC-10).
+        let denied = app.ibus("SetGlobalEngine", &("xkb:us::eng",)).await;
+        assert_eq!(denied.error().as_deref(), Some(ACCESS_DENIED));
+        assert!(bus.ime.enabled());
+        // Selecting the engine stays harmless for anyone.
+        app.ibus("SetGlobalEngine", &("vr-talex",)).await.ok();
+        assert!(bus.ime.enabled());
+
+        // Names that are neither the engine nor a bounded xkb name are refused.
+        let long = format!("xkb:{}", "a".repeat(200));
+        for name in ["xkb:", "pinyin", long.as_str(), "xkb:us\n"] {
+            let bad = shell.ibus("SetGlobalEngine", &(name,)).await;
+            assert_eq!(bad.error().as_deref(), Some(INVALID_ARGS), "{name:?}");
+        }
+        assert!(bus.ime.enabled());
+    });
+}
+
+#[test]
+fn a_word_of_another_frontend_is_kept_across_the_switch() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        shell.bus("RequestName", &(PANEL, 2u32)).await.ok();
+
+        // A context of fe-fcitx with a word in progress.
+        use ime_core::{Action, Caps, KeyEvent, Mods};
+        let other = bus.ime.create_context();
+        let caps = Caps {
+            preedit: true,
+            surrounding_text: false,
+            password: false,
+        };
+        bus.ime.set_caps(other, caps);
+        for c in "dd".chars() {
+            bus.ime
+                .process_key(other, KeyEvent::press(c as u32, Mods::NONE));
+        }
+        shell.ibus("SetGlobalEngine", &("xkb:us::eng",)).await.ok();
+        let next = bus
+            .ime
+            .process_key(other, KeyEvent::press('a' as u32, Mods::NONE));
+        assert!(!next.handled);
+        assert_eq!(
+            next.actions,
+            [Action::HidePreedit, Action::Commit("đ".into())]
+        );
+    });
+}
+
+#[test]
+fn the_ime_is_on_again_when_the_panel_leaves() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        shell.bus("RequestName", &(PANEL, 2u32)).await.ok();
+        shell.ibus("SetGlobalEngine", &("xkb:us::eng",)).await.ok();
+        assert!(!bus.ime.enabled());
+
+        // Nobody else may switch it on, so a shell that is gone must not leave it off.
+        drop(shell);
+        let start = std::time::Instant::now();
+        while !bus.ime.enabled() && start.elapsed() < Duration::from_secs(2) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(bus.ime.enabled());
+    });
+}
+
+fn name_result(answer: &Answer) -> u32 {
+    let (code,): (u32,) = answer.reply.body().deserialize().expect("(u)");
+    code
+}
+
+#[test]
+fn the_ime_is_on_again_when_the_panel_releases_its_name() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        shell.bus("RequestName", &(PANEL, 2u32)).await.ok();
+        let mut app = bus.greeted().await;
+        shell.ibus("SetGlobalEngine", &("xkb:us::eng",)).await.ok();
+        assert!(!bus.ime.enabled());
+
+        // Another client cannot release the panel's name, so the IME stays off.
+        let denied = app.bus("ReleaseName", &(PANEL,)).await.ok();
+        assert_eq!(name_result(&denied), 3);
+        assert!(!bus.ime.enabled());
+
+        // The panel gives the name up while staying connected: nobody could
+        // switch the IME on any more, so it is on again.
+        let released = shell.bus("ReleaseName", &(PANEL,)).await.ok();
+        assert_eq!(name_result(&released), 1);
+        assert!(bus.ime.enabled());
+        let path = shell.shell_context().await;
+        shell.unasked(QUIET).await;
+        // A typed word composes again (every letter is handled) and commits at the space.
+        shell.type_letters(&path, "dd").await;
+        let space = shell.tap(&path, ' ' as u32).await;
+        assert!(space.before.contains(&Seen::Commit("đ".into())));
     });
 }
