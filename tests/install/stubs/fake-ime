@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Stand-in for an input method daemon on the sandbox session bus.
+
+Role (argv[1], or taken from the file name when installed as vr-talex):
+  vr-talex  writes an IBus address file with its own pid, then owns
+            org.fcitx.Fcitx5 + org.freedesktop.portal.Fcitx; removes the
+            address file on SIGTERM (plan: the daemon removes it on exit).
+  fcitx5    same names, plus /controller org.fcitx.Fcitx.Controller1.Exit;
+            on exit it leaves the address file with empty values (what the
+            real fcitx5 does, spike Q5).
+  fcitx5-stuck  like fcitx5, but Exit never makes it quit.
+  ibus      owns org.freedesktop.portal.IBus (a running ibus-daemon).
+"""
+import os
+import signal
+import sys
+
+import gi
+
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio, GLib  # noqa: E402
+
+CONTROLLER_XML = """
+<node>
+  <interface name="org.fcitx.Fcitx.Controller1">
+    <method name="Exit"/>
+  </interface>
+</node>
+"""
+
+
+def main() -> int:
+    if len(sys.argv) > 1:
+        role = sys.argv[1]
+    else:
+        role = "vr-talex"
+    conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    loop = GLib.MainLoop()
+    pid = os.getpid()
+
+    runtime = os.environ["XDG_RUNTIME_DIR"]
+    os.makedirs(os.path.join(runtime, "stub-pids"), exist_ok=True)
+    with open(os.path.join(runtime, "stub-pids", f"{role}.{pid}"), "w") as f:
+        f.write(str(pid))
+
+    config = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.environ["HOME"], ".config")
+    busdir = os.path.join(config, "ibus", "bus")
+    mid = conn.call_sync(
+        "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.Peer",
+        "GetMachineId", None, GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, -1, None,
+    ).unpack()[0]
+    addr_file = os.path.join(busdir, f"{mid}-unix-wayland-0")
+
+    def write_addr(address: str, owner: str) -> None:
+        os.makedirs(busdir, exist_ok=True)
+        tmp = addr_file + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(f"IBUS_ADDRESS={address}\nIBUS_DAEMON_PID={owner}\n")
+        os.replace(tmp, addr_file)
+
+    if role == "vr-talex":
+        write_addr(f"unix:path={runtime}/vr-talex/ibus-{pid}", str(pid))
+        names = ["org.fcitx.Fcitx5", "org.freedesktop.portal.Fcitx"]
+    elif role in ("fcitx5", "fcitx5-stuck"):
+        write_addr(f"unix:path={runtime}/fake-fcitx5-{pid}", str(pid))
+        names = ["org.fcitx.Fcitx5", "org.freedesktop.portal.Fcitx"]
+    elif role == "ibus":
+        names = ["org.freedesktop.portal.IBus"]
+    else:
+        print(f"fake-ime: unknown role {role}", file=sys.stderr)
+        return 2
+
+    def finish() -> bool:
+        if role == "vr-talex":
+            try:
+                os.unlink(addr_file)
+            except FileNotFoundError:
+                pass
+        elif role in ("fcitx5", "fcitx5-stuck"):
+            write_addr("", "")
+        loop.quit()
+        return False
+
+    if role in ("fcitx5", "fcitx5-stuck"):
+        node = Gio.DBusNodeInfo.new_for_xml(CONTROLLER_XML)
+
+        def on_call(_c, _s, _p, _i, method, _params, invocation):
+            invocation.return_value(None)
+            # "fcitx5-stuck" acknowledges Exit but never quits.
+            if method == "Exit" and role == "fcitx5":
+                GLib.idle_add(finish)
+
+        conn.register_object("/controller", node.interfaces[0], on_call, None, None)
+
+    for name in names:
+        reply = conn.call_sync(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+            "RequestName", GLib.Variant("(su)", (name, 4)), GLib.VariantType("(u)"),
+            Gio.DBusCallFlags.NONE, -1, None,
+        ).unpack()[0]
+        if reply != 1:
+            print(f"fake-ime: {name} is taken", file=sys.stderr)
+            return 1
+
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, finish)
+    loop.run()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

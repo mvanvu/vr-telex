@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Sandbox stand-in for fcitx5-remote: only -e (ask fcitx5 to quit) is used.
+set -euo pipefail
+printf 'fcitx5-remote %s\n' "$*" >>"${XDG_RUNTIME_DIR:?}/stub-calls.log"
+case "${1:-}" in
+  -e)
+    gdbus call --session --dest org.fcitx.Fcitx5 --object-path /controller \
+      --method org.fcitx.Fcitx.Controller1.Exit >/dev/null
+    ;;
+  *) echo "stub fcitx5-remote: unsupported: $*" >&2; exit 2 ;;
+esac

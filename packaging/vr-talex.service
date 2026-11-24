@@ -1,0 +1,39 @@
+[Unit]
+Description=vr-talex Vietnamese Telex input method
+PartOf=graphical-session.target
+After=graphical-session.target
+# Restart forever, but never lock the user out permanently (SEC-17).
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+# The daemon sends READY=1 once it owns its D-Bus names and has written the
+# IBus address file, then WATCHDOG=1 from the key loop at least every
+# WatchdogSec/2 (it reads WATCHDOG_USEC), so a hung daemon is restarted (SEC-18).
+Type=notify
+NotifyAccess=main
+ExecStart="%h/.local/bin/vr-talex"
+Restart=always
+RestartSec=1
+TimeoutStartSec=10
+WatchdogSec=10
+
+# No core dumps: memory holds keystrokes (SEC-3).
+LimitCORE=0
+# Hardening that works in a user manager without user namespaces (SEC-28);
+# Ubuntu 24.04 restricts unprivileged user namespaces, so Protect*/Private*
+# options would make the unit fail to start.
+UMask=0077
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=graphical-session.target

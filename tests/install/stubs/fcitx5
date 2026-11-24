@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Sandbox stand-in for fcitx5: "-d" daemonizes the fake and returns once it
+# owns org.fcitx.Fcitx5, like the real "fcitx5 -d".
+set -euo pipefail
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+printf 'fcitx5 %s\n' "$*" >>"${XDG_RUNTIME_DIR:?}/stub-calls.log"
+case " $* " in
+  *" -d "*)
+    setsid python3 "$here/fake-ime" fcitx5 </dev/null >>"$XDG_RUNTIME_DIR/fake-fcitx5.log" 2>&1 &
+    gdbus wait --session --timeout 5 org.fcitx.Fcitx5
+    ;;
+  *) exec python3 "$here/fake-ime" fcitx5 ;;
+esac
