@@ -316,11 +316,19 @@ keep_user_copy() {
 
 # Record what install wrote, so uninstall can tell the user's later edits
 # from its own files.
+# Called before dst is written: if the record cannot be made, nothing has
+# been written yet, so a rollback never meets an unrecorded vr-talex file.
 record_installed() {
-  local r
-  r=$(rel "$1")
-  mkdir -p -- "$BACKUP_DIR/installed/$(dirname -- "$r")" &&
-    cp -a -- "$1" "$BACKUP_DIR/installed/$r"
+  local src=$1 mode=$2 dst=$3 r dir tmp
+  r=$(rel "$dst")
+  dir=$BACKUP_DIR/installed/$(dirname -- "$r")
+  mkdir -p -- "$dir" || return 1
+  tmp=$(mktemp "$dir/.rec.XXXXXX") || return 1
+  if cp -- "$src" "$tmp" && chmod "$mode" "$tmp" && mv -f -- "$tmp" "$BACKUP_DIR/installed/$r"; then
+    return 0
+  fi
+  rm -f -- "$tmp"
+  return 1
 }
 
 installed_gs() {

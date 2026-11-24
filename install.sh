@@ -157,10 +157,12 @@ install_managed() {
   if exists "$inst" && exists "$dst" && ! same_entry "$dst" "$inst" && ! cmp -s -- "$src" "$dst"; then
     keep_user_copy "$dst" || die "cannot move $dst aside"
   fi
-  if put_file "$src" "$dst" "$mode"; then rc=0; fi
-  if ! exists "$inst" || ! same_entry "$dst" "$inst"; then
-    record_installed "$dst" || die "cannot record $dst in $BACKUP_DIR"
+  # Record first, then write (see record_installed).
+  if ! { [ -f "$inst" ] && [ ! -L "$inst" ] && cmp -s -- "$src" "$inst" &&
+    [ "$(stat -c %a -- "$inst")" = "${mode#0}" ]; }; then
+    record_installed "$src" "$mode" "$dst" || die "cannot record $dst in $BACKUP_DIR"
   fi
+  if put_file "$src" "$dst" "$mode"; then rc=0; fi
   return "$rc"
 }
 
