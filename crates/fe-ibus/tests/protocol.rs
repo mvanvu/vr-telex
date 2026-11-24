@@ -285,6 +285,43 @@ fn focus_out_and_reset_leave_the_commit_to_a_client_that_commits_its_preedit() {
 }
 
 #[test]
+fn gnome_shells_focus_out_in_a_terminal_leaves_the_word_to_the_compositor() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        let path = shell.shell_context().await;
+        shell.unasked(QUIET).await;
+        // gnome-terminal through the shell: purpose TERMINAL.
+        shell.set(&path, "ContentType", (10u32, 0u32)).await.ok();
+        let last = shell.type_letters(&path, "vieet").await;
+        // "Commit" mode: Mutter keeps this preedit and commits it itself
+        // when the text-input focus moves (clutter_input_focus_reset),
+        // before the shell's focus-out reaches the engine.
+        assert_eq!(last, [preedit("viêt")]);
+
+        // inputMethod.js `vfunc_focus_out`: `_fullReset` (content type
+        // cleared, cursor cleared, Reset), then FocusOut. A CommitText in
+        // any of these answers would come after Mutter's commit.
+        let content = shell.set(&path, "ContentType", (0u32, 0u32)).await.ok();
+        assert_eq!(content.before, []);
+        let cursor = shell
+            .context(&path, "SetCursorLocation", &(0i32, 0i32, 0i32, 0i32))
+            .await
+            .ok();
+        assert_eq!(cursor.before, []);
+        let reset = shell.context(&path, "Reset", &()).await.ok();
+        assert_eq!(reset.before, [hidden(Some(0))]);
+        let focus_out = shell.context(&path, "FocusOut", &()).await.ok();
+        assert_eq!(focus_out.before, []);
+
+        // The word ended there: the next one starts afresh.
+        shell.context(&path, "FocusIn", &()).await.ok();
+        let last = shell.type_letters(&path, "as").await;
+        assert_eq!(last, [preedit("á")]);
+    });
+}
+
+#[test]
 fn a_client_that_does_not_commit_its_preedit_gets_the_word_once() {
     block_on(async {
         let bus = Bus::start().await;
