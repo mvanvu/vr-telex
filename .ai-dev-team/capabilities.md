@@ -16,3 +16,7 @@
 - e2e harness: `tests/e2e/run.sh` (headless GNOME Shell sandbox, RemoteDesktop key injection, readback from gnome-terminal / Chrome DevTools / VS Code, character diff, SEC-1 leak scan) — T9
 - stdlib D-Bus client/server for tests: `tests/e2e/dbuslite.py` — T9
 - stub IBus engine for harness checks: `tests/e2e/stub_ime.py` — T9
+- fcitx5 D-Bus frontend `fe_fcitx::{run, serve(conn, ime, ready, Options), Options, FCITX_NAME, PORTAL_NAME}`: owns org.fcitx.Fcitx5 + org.freedesktop.portal.Fcitx (waits for the previous owner up to `name_wait`), InputMethod1/InputContext1 at fcitx5's paths, one task per client connection, same-uid check, per-connection context tables, unicast signals before replies — crates/fe-fcitx/src/{lib,server}.rs (T6)
+- fcitx wire helpers: CapabilityFlag → `Caps` (`caps_from_fcitx`, password|sensitive|disable → passthrough), `key_event`, `byte_cursor` (char → UTF-8 byte cursor) — crates/fe-fcitx/src/wire.rs (T6)
+- Test helper: private dbus-daemon per test (path socket in CARGO_TARGET_TMPDIR, stock session policy, no service dirs, killed on drop) + fcitx5-gtk–like zbus client `App` (pipelined key typing, applies CommitString/UpdateFormattedPreedit) — crates/fe-fcitx/tests/bus.rs (T6)
+- Headless smoke for the fcitx route: gnome-terminal with GTK_IM_MODULE=fcitx through a real vr-talex binary, reusing T1 lib.sh/rd.py with its own dirs — .ai-dev-team/workspace/qa-artifacts/T6/smoke.sh (T6)
