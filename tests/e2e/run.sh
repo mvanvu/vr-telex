@@ -64,8 +64,6 @@ if [ "${E2E_INNER:-}" != 1 ]; then
   export E2E_LIVE_BUS="${DBUS_SESSION_BUS_ADDRESS:-}" E2E_LIVE_BUS_ID=""
   [ -n "$E2E_LIVE_BUS" ] && E2E_LIVE_BUS_ID="$(bus_id)"
   iso_env "$RUN_DIR/sandbox"
-  if [ "$IME" = none ]; then SRC="[('xkb', 'us')]"; else SRC="[('ibus', 'vr-talex')]"; fi
-  printf "[org/gnome/desktop/input-sources]\nsources=%s\n" "$SRC" > "$XDG_CONFIG_HOME/glib-2.0/settings/keyfile"
   export E2E_INNER=1 RUN_DIR LOGS="$RUN_DIR/logs" OUTD="$RUN_DIR/out" E2E_START="$(date +%s)"
   echo "e2e: run dir $RUN_DIR; ime=$IME apps=[$APPS] runs=$RUNS words=$WORDS delay=$DELAY scenarios=[$SCENARIOS] route=$ROUTE"
   dbus-run-session -- bash "$0" --ime "$IME" --apps "$APPS" --runs "$RUNS" --words "$WORDS" --seed "$SEED" \
@@ -90,6 +88,11 @@ finish() {
 }
 trap finish EXIT
 guard
+# GSettings go through a dconf activated on this private bus, as on the desktop: the keyfile backend
+# rewrites the whole file from each process' cache, so any app's write can undo an install or uninstall
+# that happened a moment before.
+if [ "$IME" = none ]; then SRC="[('xkb', 'us')]"; else SRC="[('ibus', 'vr-talex')]"; fi
+gsettings set org.gnome.desktop.input-sources sources "$SRC" || { echo "could not seed the input sources"; exit 1; }
 
 if [ "$ROUTE" = fcitx ]; then export GTK_IM_MODULE=fcitx QT_IM_MODULE=fcitx XMODIFIERS=@im=fcitx SDL_IM_MODULE=fcitx
 else export XMODIFIERS=@im=ibus; fi

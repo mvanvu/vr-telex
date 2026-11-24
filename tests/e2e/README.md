@@ -7,7 +7,9 @@ take the real compositor path: Mutter → gnome-shell → IBus → the engine �
 
 ## Isolation (D2, SEC-29)
 Every run happens inside `dbus-run-session` with a throwaway `HOME`, `XDG_*` dirs and `XDG_RUNTIME_DIR`
-under the run directory, keyfile GSettings, and a headless `gnome-shell --headless --wayland
+under the run directory, GSettings in the sandbox's own dconf (`dconf-service` activated on the private
+bus, database under the sandbox `XDG_CONFIG_HOME`; the keyfile backend loses writes when several processes
+write at once), and a headless `gnome-shell --headless --wayland
 --virtual-monitor 1280x800 --unsafe-mode`. `lib.sh: guard` aborts (exit 97) before any launch when
 `HOME`, `XDG_RUNTIME_DIR` or `DBUS_SESSION_BUS_ADDRESS` still point at the live desktop. The live
 desktop, its session bus, its fcitx5 and its input sources are never touched. Teardown stops exactly the

@@ -531,7 +531,10 @@ def cmd_latency(a):
           f"max {s.get('max_us')} us -> {verdict} (AC-10: p99 < 5000 us)")
 
 
-INDICATOR_JS = "Object.values(Main.panel.statusArea.keyboard._indicatorLabels ?? {}).map(l => l.text).join()"
+# The current source's label only (same expression as lib.sh CUR_LABEL_JS): with more than one source
+# the panel holds one label per source.
+INDICATOR_JS = ('(k => k._indicatorLabels?.[k._inputSourceManager?.currentSource?.index]?.text ?? "")'
+                '(Main.panel.statusArea.keyboard)')
 
 
 def shell_eval(conn, js):

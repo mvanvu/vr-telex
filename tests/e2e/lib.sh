@@ -1,6 +1,7 @@
 # Shared helpers for tests/e2e/run.sh. Sourced, not executed.
 # Everything runs in a throwaway session (D2, SEC-29): own D-Bus session bus (dbus-run-session),
-# own HOME / XDG_* / XDG_RUNTIME_DIR under the run directory, keyfile GSettings. Never the live desktop.
+# own HOME / XDG_* / XDG_RUNTIME_DIR under the run directory, its own dconf (activated on the private bus,
+# database under the sandbox XDG_CONFIG_HOME). Never the live desktop.
 
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIVE_HOME="$(getent passwd "$(id -u)" | cut -d: -f6)"
@@ -18,7 +19,7 @@ iso_env() {
   export XDG_RUNTIME_DIR="$E2E_RUNTIME" E2E_RUNTIME
   export HOME="$SB/home" XDG_CONFIG_HOME="$SB/home/.config" XDG_DATA_HOME="$SB/home/.local/share" \
          XDG_STATE_HOME="$SB/home/.local/state" XDG_CACHE_HOME="$SB/home/.cache" \
-         GSETTINGS_BACKEND=keyfile XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=ubuntu:GNOME NO_AT_BRIDGE=1 \
+         GSETTINGS_BACKEND=dconf XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=ubuntu:GNOME NO_AT_BRIDGE=1 \
          VRT_E2E_TAG="vrt-e2e-$$-$(date +%s)" E2E_SANDBOX="$SB"
   unset WAYLAND_DISPLAY DISPLAY DBUS_SESSION_BUS_ADDRESS GTK_IM_MODULE QT_IM_MODULE XMODIFIERS SDL_IM_MODULE \
         IBUS_ADDRESS IBUS_ADDRESS_FILE GNOME_SETUP_DISPLAY XAUTHORITY SESSION_MANAGER SSH_AUTH_SOCK \
@@ -92,8 +93,12 @@ sh_eval() { gdbus call --session -d org.gnome.Shell -o /org/gnome/Shell -m org.g
 # Unquoted result of sh_eval.
 sh_value() { sh_eval "$1" | sed -E "s/^\(true, '\"?//; s/\"?'\)$//"; }
 
-IME_STATE='[Main.inputMethod._currentSource?.id ?? "", Object.values(Main.panel.statusArea.keyboard._indicatorLabels ?? {}).map(l => l.text).join()].join("|")'
-indicator() { sh_value "Object.values(Main.panel.statusArea.keyboard._indicatorLabels ?? {}).map(l => l.text).join()"; }
+# The panel keeps one label per input source; only the current source's label shows the engine mode.
+# Joining them all reads "en,VI" once an xkb layout sits beside vr-talex (after install), which never
+# equals "VI".
+CUR_LABEL_JS='(k => k._indicatorLabels?.[k._inputSourceManager?.currentSource?.index]?.text ?? "")(Main.panel.statusArea.keyboard)'
+IME_STATE="[Main.inputMethod._currentSource?.id ?? \"\", $CUR_LABEL_JS].join(\"|\")"
+indicator() { sh_value "$CUR_LABEL_JS"; }
 
 # wait_win <wm_class>: bounded wait (30 s) until a window of that class has a real size, then focus it.
 wait_win() {

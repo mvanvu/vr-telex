@@ -29,10 +29,20 @@ start() {
   local f="\$UNITS/\$1.service"; [ -f "\$f" ] || { echo "Unit \$1.service not found." >&2; return 5; }
   local cmd; cmd=\$(sed -n 's/^ExecStart=//p' "\$f" | head -1 | sed "s|%h|\$HOME|g")
   [ -f "\$STATE/\$1.pid" ] && kill -0 "\$(cat "\$STATE/\$1.pid")" 2>/dev/null && return 0
-  \$cmd >>"$LOGS/unit-\$1.log" 2>&1 < /dev/null &
+  # Shell-parse the line so a quoted binary path (as the unit writes it) runs as the binary it names.
+  local argv; eval "argv=(\$cmd)"
+  "\${argv[@]}" >>"$LOGS/unit-\$1.log" 2>&1 < /dev/null &
   echo \$! > "\$STATE/\$1.pid"
 }
-stop() { [ -f "\$STATE/\$1.pid" ] && kill -TERM "\$(cat "\$STATE/\$1.pid")" 2>/dev/null; rm -f "\$STATE/\$1.pid"; return 0; }
+# Like real systemctl, stop returns only once the process is gone (bounded wait, then SIGKILL).
+stop() {
+  local p i; [ -f "\$STATE/\$1.pid" ] && p=\$(cat "\$STATE/\$1.pid")
+  rm -f "\$STATE/\$1.pid"
+  [ -n "\$p" ] || return 0
+  kill -TERM "\$p" 2>/dev/null
+  for i in \$(seq 50); do kill -0 "\$p" 2>/dev/null || return 0; sleep 0.1; done
+  kill -KILL "\$p" 2>/dev/null; sleep 0.2; return 0
+}
 rc=0
 case "\$verb" in
   daemon-reload|reset-failed|import-environment|set-environment|unset-environment) ;;
