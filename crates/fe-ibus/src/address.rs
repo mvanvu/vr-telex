@@ -10,6 +10,8 @@ use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
+use rustix::fs::OFlags;
+
 const APP_DIR: &str = "vr-talex";
 const SOCKET_FILE: &str = "ibus";
 /// Held by the running instance for its whole run (SEC-7).
@@ -94,6 +96,19 @@ pub(crate) struct Prepared {
     pub(crate) lock: File,
 }
 
+/// Opens or creates the lock file itself, never what a link there points to.
+fn open_lock(path: &Path) -> io::Result<File> {
+    OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        // The directory is checked to be a real 0700 one of this user, but
+        // the open must not depend on that check alone.
+        .custom_flags(OFlags::NOFOLLOW.bits().cast_signed())
+        .open(path)
+}
+
 /// Takes `<dir>/ibus.lock` for this run. The kernel releases the lock when
 /// the process ends however it ends, so a crashed run never blocks a restart.
 fn take_lock(dir: &Path, uid: u32) -> Result<File, PrepareError> {
@@ -104,14 +119,7 @@ fn take_lock(dir: &Path, uid: u32) -> Result<File, PrepareError> {
         Err(err) if err.kind() == io::ErrorKind::NotFound => {}
         Err(err) => return Err(err.into()),
     }
-    // The directory is a real 0700 one of this user, checked just before:
-    // nobody else can put a link here between the check and the open.
-    let lock = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .open(&path)?;
+    let lock = open_lock(&path)?;
     match lock.try_lock() {
         Ok(()) => Ok(lock),
         Err(TryLockError::WouldBlock) => Err(PrepareError::Running),
@@ -262,6 +270,23 @@ impl Drop for Published {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_lock_is_never_opened_through_a_link() {
+        let dir = std::env::temp_dir().join(format!("vr-talex-lock-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        let target = dir.join("victim");
+        let link = dir.join(LOCK_FILE);
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        assert!(open_lock(&link).is_err());
+        assert!(!target.exists(), "nothing was created behind the link");
+
+        fs::remove_file(&link).unwrap();
+        assert!(open_lock(&link).is_ok());
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     const ID: &str = "0123456789abcdef0123456789abcdef";
 
