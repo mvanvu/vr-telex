@@ -23,8 +23,7 @@ engine code and without any dictionary or third-party word list.
   `oa/oe/uy` on the second vowel, `ia/ua/ưa` open syllables on the first, middle vowel of three-vowel nuclei.
 - The reverse function (syllable -> Telex keys) is in the same script.
 - English / code words: a hand-written list in the script, filtered so that no Telex reading of the word
-  (key letters kept, dropped, doubled or collapsed, and since D18 any later `a`/`e`/`o`/`d` that repeats an
-  earlier letter dropped as a free-order key) can be a valid Vietnamese syllable.
+  (key letters kept, dropped, doubled or collapsed) can be a valid Vietnamese syllable.
 
 ## Regenerate
 `python3 -I tools/golden-gen/gen.py` (Python 3 standard library only, no network; `--out PATH` writes elsewhere).
@@ -39,22 +38,8 @@ Check the result: tab count, NFC, duplicates, at least 2,000 cases.
 6. `w` alone as `ư` (`tw` -> `tư`, `nhwng` -> `nhưng`).
 7. `z` clears the tone and keeps the diacritics (`vieetjz` -> `viêt`).
 8. Hand-written: `dd`, `w`, `uow`, undo by repetition (`ass`, `aaa`, `ddd`, `ww`), `asz`.
-9. Free-order circumflex (D18), only for syllables with one `â`/`ê`/`ô`, the hat key typed late as a plain
-   `a`/`e`/`o` with no adjacent pair. Three placements, each with a capitalised and an ALL CAPS sample:
-   after the final, tone last (`vietej` -> `việt`, `viete` -> `viêt`); tone key then hat key (`tiengse` -> `tiếng`);
-   tone key, hat key, then the final (`vieset` -> `viết`). Open syllables whose hat vowel is last in the nucleus
-   appear only with a tone between the two keys (`bese` -> `bế`); `toio` -> `tôi`.
-10. Free-order `đ` (D18): initial `d` plus a later `d` after the final (`duowngd` -> `đương`, `dinhd` -> `đinh`)
-    or after the tone key (`duowngfd` -> `đường`), with capitalised and ALL CAPS samples.
-11. Hand-written D18 cases (the examples of the decision, `ana` -> `ân`, `dad` -> `đa`, ...).
-12. English / code words that stay raw under D18 (`class`, `https`, `git`, `windows`, ...), plain, capitalised
-    for a sample, upper case for a sample (309 distinct words).
-13. `english_now_vietnamese`: English words whose keys now form a valid syllable (`reset` -> `rết`, `photo` -> `phôt`),
-    plain and capitalised. Other words that the D18 reading turns into a syllable but whose result is not one
-    of the generated cases (`await`, `array`, `queue`, `safari`, `freeze`) are dropped from both lists.
-
-Sections 1-8 are unchanged by D18. Keys such as `boeo` (a later `o` would put a hat on the first `o`) give no
-valid syllable, so they stay as in section 1-8: `boeo` -> `boeo`.
+9. English / code words that pass through unchanged (`class`, `https`, `git`, `windows`, ...),
+   plain, capitalised for a sample, upper case for a sample.
 
 Expected values use D13: `hoà`, `khoẻ`, `thuý`, `mía`, `múa`, `mưa`, `quý`, `giá`, `gì`, `gìn`,
 `người` (ơ), `việt` (ê).

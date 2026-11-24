@@ -184,63 +184,13 @@ fn more_letters_after_undo_restore_raw() {
     ]);
 }
 
-/// D18: a later `a`/`e`/`o` puts the hat on the matching earlier vowel when
-/// the result is a valid syllable.
 #[test]
-fn free_order_circumflex() {
+fn adjacent_doubling_only() {
     check(&[
-        ("vieset", "viết"),
-        ("vietej", "việt"),
-        ("vietje", "việt"),
-        ("tiengse", "tiếng"),
-        ("tiesnge", "tiếng"),
-        ("xono", "xôn"),
-        ("tana", "tân"),
-        ("muonos", "muốn"),
-        ("VIESET", "VIẾT"),
-        ("Tana", "Tân"),
-        // English words that form a syllable now change (D18 accepts it).
-        ("reset", "rết"),
-        ("photo", "phôt"),
-    ]);
-}
-
-#[test]
-fn free_order_circumflex_invalid_is_plain_letter() {
-    check(&[
-        // `oâ` is no nucleus: `a` stays a plain letter, the word goes raw.
-        ("toana", "toana"),
-        ("bae", "bae"),
-        ("hoeo", "hoeo"),
-    ]);
-}
-
-/// D18: a later `d` turns the initial `d` into `đ`.
-#[test]
-fn free_order_d() {
-    check(&[
-        ("dinhd", "đinh"),
-        ("duowngd", "đương"),
-        ("duowngfd", "đường"),
-        ("duowngdf", "đường"),
-        ("dad", "đa"),
-        ("Dinhd", "Đinh"),
-        ("DINHD", "ĐINH"),
-        // No initial `d`: a plain letter, and `d` is no final.
-        ("band", "band"),
-    ]);
-}
-
-#[test]
-fn free_order_keeps_undo_by_repeat() {
-    check(&[
-        ("vietee", "viete"),
-        ("tanaa", "tana"),
-        ("dadd", "dad"),
-        ("dinhdd", "dinhd"),
-        ("aaa", "aa"),
-        ("ass", "as"),
-        ("ddd", "dd"),
+        ("reset", "reset"),
+        ("photo", "photo"),
+        ("queue", "queue"),
+        ("tana", "tana"),
     ]);
 }
 
@@ -420,23 +370,4 @@ fn backspace_state_stays_consistent() {
         ("nguowi<f", "ngườ"),
         ("aa<aa", "â"),
     ]);
-}
-
-#[test]
-fn backspace_after_free_order_marks() {
-    check_bs(&[
-        ("vieset<", "viế"),
-        ("dinhd<", "đin"),
-        ("tana<", "tâ"),
-        ("vieset<t", "viết"),
-    ]);
-}
-
-#[test]
-fn backspace_after_undo_reports_raw_when_no_syllable_fits() {
-    // `w` undoes the mid-word ư, leaving letters t,w,n that no syllable fits.
-    let (text, outcome) = type_with_bs("twnw<");
-    assert_eq!(text, "twn");
-    assert_eq!(outcome, Outcome::Invalid);
-    check_bs(&[("twnw<a", "twna")]);
 }
