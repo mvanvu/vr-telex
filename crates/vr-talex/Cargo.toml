@@ -11,8 +11,9 @@ ime-core.workspace = true
 fe-ibus.workspace = true
 fe-fcitx.workspace = true
 fe-xim.workspace = true
-# Only the runtime: frontends are async (zbus/x11rb event loops); no macros, no I/O drivers yet.
-tokio = { workspace = true, features = ["rt"] }
+# Runtime for the async frontends, SIGTERM handling and the watchdog timer; no macros.
+tokio = { workspace = true, features = ["rt", "signal", "time"] }
+rustix.workspace = true
 
 [lints]
 workspace = true

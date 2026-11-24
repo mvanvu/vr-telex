@@ -8,3 +8,9 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+telex-core.workspace = true
+zeroize.workspace = true
+# Only the watch channel behind `ModeWatch`; no runtime is pulled in here.
+tokio = { workspace = true, features = ["sync"] }

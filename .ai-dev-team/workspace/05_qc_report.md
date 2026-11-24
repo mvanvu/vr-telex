@@ -78,3 +78,79 @@ Run against the worktree (t2-regression.log) vs T2-qc/probe2.log: byte-identical
 | Passthrough class/github/windows | PASS | d18-cases.log |
 | T2 regression (40 cases) | PASS | t2-regression.log identical to probe2.log |
 | No repo files modified | PASS | only files under qa-artifacts |
+
+## QC T4 — QC_PASS
+Tree: master 666922d + uncommitted T4 files. Own probe: `qa-artifacts/T4-qc/probe/` (release build, `target-dir` under T4-qc), log `qa-artifacts/T4-qc/probe.log`, 35 checks, FAILS=0. Engine: Rust probe driving `SharedIme` with keysyms, X11 masks, press and release events.
+
+| Case | Status | Evidence |
+|---|---|---|
+| AC-3 vieetj then focus_out / reset / destroy_context / set_caps change | pass | preedit `việt`, one Commit `việt`, a second call commits nothing, buffer 0 |
+| AC-4 Ctrl,Shift,Shift-up,Ctrl-up; Ctrl,Shift,Ctrl-up,Shift-up; Shift,Ctrl,... ; toggle back | pass | Vi->En->Vi, every modifier event handled=false |
+| AC-4 Ctrl+Shift+t/p/c/v/T | pass | no toggle, handled=false |
+| AC-4 held 1.1 s / 0.9 s (injected clock) | pass | no toggle / toggle |
+| D7 toggle mid-word | pass | word committed once, mode En |
+| AC-7 password `matkhau1s` | pass | all handled=false, 0 actions, buffered 0; caps->password mid-word flushes `vie` (SEC-13) |
+| AC-8 FileStateStore in temp XDG_STATE_HOME | pass | default VI, saved `EN`, file 0600, dir 0700, new instance loads En, corrupt file gives VI |
+| D10 surrounding (no preedit) | pass | only Commit + DeleteSurrounding(offset == -chars) actions, text `việt` |
+| D10 neither | pass | nothing until boundary, then Commit `việt` on Space, Space unhandled |
+| EN mode | pass | all keys (letters, BackSpace, Return, Left) handled=false, 0 actions |
+| Sentence `Tieengs Vieetj raats ddepj ` | pass | `Tiếng Việt rất đẹp ` in preedit, surrounding and hold modes |
+| Ctrl+a / BackSpace in word, modifier events | pass | Ctrl+a flushes and passes; BackSpace handled; all modifier events handled=false |
+| Never-drop, 40 letters | pass | 32 committed + 8 passed through = 40 |
+| AC-10 10,000 process_key, release | pass | p50 948 ns, p99 1947 ns, max 36.5 us |
+| SEC-1 binary run | pass (limited) | all three frontends are T5-T7 placeholders returning at once, so the binary exits 0 immediately with no output; run with temp HOME/XDG, NOTIFY_SOCKET unset, nothing written, no bus used. Hardening (dumpable/rlimit) and the notifier not exercised at runtime |
+
+## Rule check T4
+| Rule | Result | Evidence |
+|---|---|---|
+| AC-3 | pass | probe.log AC-3 x4 |
+| AC-4 / D7 | pass | probe.log AC-4 lines |
+| AC-7 | pass | probe.log AC-7 |
+| AC-8 | pass | probe.log AC-8 x4 |
+| AC-10 | pass | p99 1.9 us |
+| D6 (one global mode) | pass | mode shared across contexts through one SharedIme; toggle persists (AC-8) |
+| D10 | pass | probe.log D10 x2, no fake key event action exists in the Action enum |
+| SEC-1 | pass (limited) | KeyEvent/Action Debug redact text (action.rs, key.rs); binary has no frontends yet |
+| SEC-3 | pass (static) | main.rs `harden()` runs before the runtime; not verified at runtime |
+| SEC-5 | pass | state file 0600 in 0700 dir, atomic rename, symlink-safe code (state.rs) |
+
+## QC T8
+Verdict: QC_PASS (2 low-severity notes, no blocking defect). Sandbox only (tests/install/run.sh mechanism: env -i, throwaway HOME/XDG, private dbus-run-session bus, GSETTINGS_BACKEND=keyfile, stubs first on PATH). Engines: bash + gsettings keyfile + dbus-daemon stubs; no browser involved.
+
+Evidence: developer suite `qa-artifacts/T8-qc/dev-suite.log` (10/10 PASS, run once); own scenarios `qa-artifacts/T8-qc/qc_extra.sh`, logs `qa-artifacts/T8-qc/logs/*.log` (sandboxes in /tmp/t8q, short path because of the 108-byte socket limit).
+
+| # | Scenario | Result | Evidence |
+|---|---|---|---|
+| dev | fresh_fcitx5, fresh_no_fcitx5, empty_sources, broken_daemon (rollback), root_refused, no_cargo, ibus_refused, activation_shadow, uninstall_without_backup, uninstall_not_installed | PASS 10/10 | dev-suite.log |
+| a | Pre-existing custom ~/.xinputrc, 50-mine.conf, sources us+fr with fr selected (mru head fr); install then uninstall | PASS: xinputrc, 50-mine.conf and the glib keyfile byte-identical, whole-HOME snapshot identical, sources and mru restored (fr first); 50-mine.conf also untouched while installed | logs/a_preexisting.log |
+| b | User appends to ~/.xinputrc after install, then uninstall | NOTE (low): the user edit is silently lost; uninstall restores the original backup and prints no warning. The installed file's header says "uninstall.sh restores the old file", so it is documented in the file, but a modified-since-install check (warn or keep a copy) is missing | logs/b_user_edit.log |
+| c | HOME with a space (`/tmp/t8q/c/my home`) | PASS: install, health check, uninstall, exact restore. NOTE (low): the D-Bus shadow service file has `Exec=/tmp/t8q/c/my home/.local/bin/vr-talex` unquoted; bus activation (not the systemd unit, which uses %h) may split at the space. Not provable in the sandbox with the stub | logs/c_space_home.log |
+| d | install x2 then uninstall x2 | PASS: no error; second install "already present", second uninstall "not installed"; diff vs pre-install snapshot empty; leftovers: none (only the pre-existing ./.config and the keyfile glib dir the keyfile backend itself creates); no vr-talex string left | logs/d_twice.log |
+| e | ~/.xinputrc is a symlink to dotfiles/xinputrc | PASS: target never clobbered (install replaces the link with a regular file, via rename); after uninstall the symlink is back (same relative target) and the target is intact | logs/e_symlink.log |
+
+AC-5 (install, idempotent) at file/keyfile level: unit, environment.d, xinputrc, autostart override, D-Bus shadow equal the packaging templates; binary 0755; backup dir 0700; keyfile after install exactly `sources=[us, vr-talex]`, `mru-sources=[vr-talex, us]`; second install leaves snapshot, keyfile and daemon PID unchanged and issues no daemon-reload or restart.
+AC-6 (uninstall restores): snapshot and keyfile byte-identical to pre-install; fcitx5 restarted when it ran before and not started when it did not; no vr-talex string left in ~/.config, ~/.local, ~/.xinputrc.
+
+Not provable in the sandbox: real typing in Vietnamese, the real systemd unit (a stub systemctl is used) and the real fcitx5/ibus (stubs), real gnome-shell reaction to the source change (selection checked only as mru-sources head in the keyfile), real D-Bus activation by bus of vr-talex with the real binary, the user's live desktop (never touched, by rule).
+
+## Rule check T8
+| Rule | Result | Evidence |
+|---|---|---|
+| AC-5 | pass (file/keyfile level) | scenarios dev fresh_*, d |
+| AC-6 | pass (file/keyfile level) | scenarios dev fresh_*, a, e |
+| SEC-19 | pass | broken_daemon: non-zero exit, rolled back, sources byte-identical, recovery command printed; sources set only after the health check (install.sh main order) |
+| SEC-21 | pass with note | first backup kept by a second install (d); exact restore (a, e); note on edits made after install (b) |
+| SEC-22 | pass | add-once (d), dedicated 90-vr-talex.conf, autostart Hidden=true override, no leftovers |
+| SEC-29 | pass | guard_sandbox aborts when HOME, bus, systemctl or fcitx5-remote are not the sandbox ones; every scenario ran under env -i; the live fcitx5 process was still running after the runs (pgrep); live gsettings not read by rule |
+
+### Re-check fix round 1 (T8)
+Verdict: QC_PASS. Same sandbox mechanism; script `qa-artifacts/T8-qc/qc_extra.sh` extended (b asserts the saved copy; c and new f also prove real dbus-daemon activation), logs in `qa-artifacts/T8-qc/logs/`. The live fcitx5 (pid 6881) was still running after the runs.
+
+| Note / scenario | Result | Evidence |
+|---|---|---|
+| b: user edit after install | FIXED: uninstall prints `warning: <HOME>/.xinputrc was changed after install; your version is kept as <HOME>/.xinputrc.vr-talex-saved-20261124-203145`; the saved file holds the user's edit (207 bytes, includes `# USER EDIT AFTER INSTALL`); ~/.xinputrc is the original `run_im fcitx5` | logs/b_user_edit.log (the leftover echo "RESULT: user edit LOST" in that log is stale script text, contradicted by the two checks) |
+| c: HOME with a space | FIXED: `Exec="/tmp/t8q/c/my home/.local/bin/vr-talex"`; stopping the unit and pinging org.fcitx.Fcitx5 made the real dbus-daemon log "Successfully activated service", the activated cmdline is the installed binary; exact restore afterwards | logs/c_space_home.log |
+| f: HOME `a & b` | PASS: `Exec="/tmp/t8q/f/a & b/.local/bin/vr-talex"`, bus activation succeeded with the installed binary, exact restore (first run failed only because my bus.conf did not XML-escape `&`; harness fix, not a product defect) | logs/f_amp_home.log |
+| a: pre-existing files | PASS: all byte-identical, snapshot identical, selection back to fr | logs/a_preexisting.log |
+| d: install x2, uninstall x2 | PASS: no error, no leftovers | logs/d_twice.log |
+| e: symlinked ~/.xinputrc | PASS: target intact, symlink back after uninstall | logs/e_symlink.log |
