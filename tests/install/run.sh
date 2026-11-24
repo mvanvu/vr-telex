@@ -21,7 +21,8 @@ SCENARIOS=(fresh_fcitx5 fresh_no_fcitx5 empty_sources broken_daemon root_refused
   edited_after_install failed_restore symlinked_config fcitx5_unit fcitx5_stuck
   reinstall_backup_deleted special_home rerun_failure bad_xdg edited_then_reinstall
   record_write_fails unit_restart_policy uninstall_activation_gap
-  uninstall_activation_gap_no_backup fcitx5_owns_ibus_portal ibus_beside_fcitx5_refused)
+  uninstall_activation_gap_no_backup fcitx5_owns_ibus_portal ibus_beside_fcitx5_refused reselect_on_rerun
+  reselect_rerun_failure reselect_keeps_user_edits)
 # A HOME with a space, an ampersand and a quote (special_home scenario).
 SPECIAL_HOME_NAME="h o&m'e"
 
@@ -195,6 +196,19 @@ expect_installed() {
   check "vr-talex source selected (first in mru-sources)" [ "$(gs mru-sources | cut -c1-21)" = "[('ibus', 'vr-talex')" ]
 }
 
+# The vr-talex start after line $1 of the stub log found vr-talex at the head
+# of mru-sources: a running gnome-shell reads that list when the daemon
+# connects, so this is what makes it select Vietnamese (Telex) (D33).
+started_with_vr_head() {
+  local line
+  line=$(tail -n +$(($1 + 1)) "$XDG_RUNTIME_DIR/stub-calls.log" | grep '^started vr-talex.service ' | tail -n 1 || true)
+  printf '  %s\n' "${line:-no vr-talex start logged}"
+  case "$line" in
+    "started vr-talex.service mru-sources=[('ibus', 'vr-talex')"*) return 0 ;;
+  esac
+  return 1
+}
+
 expect_no_vr_talex_left() {
   local hits='' f
   # The sandbox path itself contains "vr-talex" (the checkout's name), so it
@@ -230,18 +244,23 @@ sources=[('xkb', 'us'), ('ibus', 'vr-talex')]
 mru-sources=[('ibus', 'vr-talex'), ('xkb', 'us')]
 EOF
   check "pre-existing xinputrc backed up byte for byte" cmp -s "$T8_SANDBOX/pre.xinputrc" "$XDG_DATA_HOME/vr-talex/backup/files/.xinputrc"
+  check "daemon started only after vr-talex was first in mru-sources (D33)" started_with_vr_head 0
   local main1 calls1
   main1=$(systemctl --user show -p MainPID --value vr-talex.service)
-  snap "$T8_SANDBOX/inst1.snap"
+  snap "$T8_SANDBOX/inst1.snap" noibus
   cp "$(keyfile)" "$T8_SANDBOX/inst1.keyfile"
   calls1=$(wc -l <"$XDG_RUNTIME_DIR/stub-calls.log")
 
   check "second install exits 0" run_install
-  snap "$T8_SANDBOX/inst2.snap"
+  snap "$T8_SANDBOX/inst2.snap" noibus
   check "second install changes no file (snapshot identical)" same_snap "$T8_SANDBOX/inst1.snap" "$T8_SANDBOX/inst2.snap"
   check "second install leaves the keyfile byte-identical" cmp "$T8_SANDBOX/inst1.keyfile" "$(keyfile)"
-  check "second install did not restart the daemon" [ "$(systemctl --user show -p MainPID --value vr-talex.service)" = "$main1" ]
-  check "second install did not reload or restart units" sh -c "tail -n +$((calls1 + 1)) '$XDG_RUNTIME_DIR/stub-calls.log' | grep -Eq 'daemon-reload|restart|fcitx5-remote' && exit 1 || exit 0"
+  # D33: the shell may have kept another source current; only a daemon
+  # reconnect makes it read mru-sources again, so a re-run restarts it.
+  check "second install restarted the daemon (shell re-reads mru-sources)" [ "$(systemctl --user show -p MainPID --value vr-talex.service)" != "$main1" ]
+  check "second install restarted it with vr-talex first in mru-sources" started_with_vr_head "$calls1"
+  check "second install did not reload units or touch fcitx5" sh -c "tail -n +$((calls1 + 1)) '$XDG_RUNTIME_DIR/stub-calls.log' | grep -Eq 'daemon-reload|fcitx5-remote' && exit 1 || exit 0"
+  check "IBus address file holds the restarted daemon's pid" addr_file_pid_is "$(systemctl --user show -p MainPID --value vr-talex.service)"
 
   check "uninstall exits 0" run_uninstall
   snap "$T8_SANDBOX/post.snap" noibus
@@ -304,9 +323,10 @@ t_broken_daemon() {
   check "install with a dying daemon exits non-zero" [ "$rc" -ne 0 ]
   check "install prints the recovery path" grep -q 'systemctl --user disable --now vr-talex.service' <<<"$out"
   check "install says it rolled back" grep -qi 'rolled back' <<<"$out"
+  check "the failing daemon was started with vr-talex selected (the rollback had sources to undo)" started_with_vr_head 0
   snap "$T8_SANDBOX/post.snap" noibus
   check "rollback restored every file" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
-  check "sources unchanged (keyfile byte-identical)" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
+  check "sources and mru-sources restored exactly (keyfile byte-identical)" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
   check "fcitx5 runs again after rollback" has_owner org.fcitx.Fcitx5
   expect_no_vr_talex_left
 }
@@ -582,6 +602,81 @@ t_rerun_failure() {
   snap "$T8_SANDBOX/post.snap" noibus
   check "back to the pre-install state" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
   check "fcitx5 runs again" has_owner org.fcitx.Fcitx5
+}
+
+t_reselect_on_rerun() {
+  # D33: the user switched to English after install; running install again
+  # puts Vietnamese (Telex) back at the head of mru-sources before the
+  # daemon restarts, and uninstall still returns to the pre-install state.
+  pre_state_fcitx5
+  snap "$T8_SANDBOX/pre.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/pre.keyfile"
+  local out1 out2 rc=0
+  out1=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out1"
+  check "install exits 0" [ "$rc" = 0 ]
+  gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'us'), ('ibus', 'vr-talex')]"
+  local main1 calls1
+  main1=$(systemctl --user show -p MainPID --value vr-talex.service)
+  calls1=$(wc -l <"$XDG_RUNTIME_DIR/stub-calls.log")
+  out2=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out2"
+  check "second install exits 0" [ "$rc" = 0 ]
+  # BASE-48: install cannot read the shell's current source back, so it never claims it is selected.
+  check "install never prints 'selected'" sh -c '! printf "%s\n%s\n" "$1" "$2" | grep -qi selected' _ "$out1" "$out2"
+  check "mru-sources has vr-talex first again" [ "$(gs mru-sources)" = "[('ibus', 'vr-talex'), ('xkb', 'us')]" ]
+  check "sources unchanged" [ "$(gs sources)" = "[('xkb', 'us'), ('ibus', 'vr-talex')]" ]
+  check "daemon restarted" [ "$(systemctl --user show -p MainPID --value vr-talex.service)" != "$main1" ]
+  check "restarted with vr-talex first in mru-sources" started_with_vr_head "$calls1"
+  check "uninstall exits 0" run_uninstall
+  snap "$T8_SANDBOX/post.snap" noibus
+  check "files restored exactly" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
+  check "keyfile restored byte for byte" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
+  expect_no_vr_talex_left
+}
+
+t_reselect_keeps_user_edits() {
+  # Review FR-9 minor 1: after install the user adds a layout and uses it; a
+  # re-run puts vr-talex first again, and uninstall still keeps the user's
+  # own change (FR-5 rule: only the vr-talex entry is taken out).
+  pre_state_fcitx5
+  gsettings set org.gnome.desktop.wm.keybindings switch-input-source "['<Control>space']"
+  check "install exits 0" run_install
+  local rec1 out rc=0
+  rec1=$(cat "$XDG_DATA_HOME/vr-talex/backup/installed.gs")
+  gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('ibus', 'vr-talex'), ('xkb', 'de')]"
+  gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'de'), ('ibus', 'vr-talex'), ('xkb', 'us')]"
+  out=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "second install exits 0" [ "$rc" = 0 ]
+  check "mru-sources: vr-talex first, the user's order kept" [ "$(gs mru-sources)" = "[('ibus', 'vr-talex'), ('xkb', 'de'), ('xkb', 'us')]" ]
+  check "installed.gs not rewritten by the re-run" [ "$(cat "$XDG_DATA_HOME/vr-talex/backup/installed.gs")" = "$rec1" ]
+  check "install names the user's switch shortcut (D33)" grep -qF '<Control>space' <<<"$out"
+  check "install does not name Super+Space" sh -c '! printf "%s\n" "$1" | grep -q "Super+Space"' _ "$out"
+  check "uninstall exits 0" run_uninstall
+  check "sources keep the user's layout" [ "$(gs sources)" = "[('xkb', 'us'), ('xkb', 'de')]" ]
+  check "mru-sources keep the user's layout first" [ "$(gs mru-sources)" = "[('xkb', 'de'), ('xkb', 'us')]" ]
+  expect_no_vr_talex_left
+}
+
+t_reselect_rerun_failure() {
+  # SEC-19 on the re-run path: the re-selection is written, the restarted
+  # daemon dies, and the rollback leaves the pre-install sources exactly.
+  pre_state_fcitx5
+  snap "$T8_SANDBOX/pre.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/pre.keyfile"
+  check "install exits 0" run_install
+  gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'us'), ('ibus', 'vr-talex')]"
+  local out rc=0
+  out=$(VR_TALEX_BIN="$T8_STUBS/broken-vr-talex" run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "failed re-run exits non-zero" [ "$rc" -ne 0 ]
+  check "says it rolled back" grep -qi 'rolled back' <<<"$out"
+  snap "$T8_SANDBOX/post.snap" noibus
+  check "back to the pre-install files" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
+  check "keyfile restored byte for byte" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
+  check "fcitx5 runs again" has_owner org.fcitx.Fcitx5
+  expect_no_vr_talex_left
 }
 
 t_bad_xdg() {

@@ -45,6 +45,11 @@ start_unit() {
   # The unit quotes the path; this stub runs a single word.
   exec=${exec#\"}
   exec=${exec%\"}
+  # A running gnome-shell re-reads mru-sources when the daemon (re)connects,
+  # so the tests check which value the daemon start found (D33).
+  printf 'started %s mru-sources=%s\n' "$u" \
+    "$(gsettings get org.gnome.desktop.input-sources mru-sources 2>/dev/null || echo '?')" \
+    >>"$XDG_RUNTIME_DIR/stub-calls.log"
   setsid "$exec" </dev/null >>"$st/$u.log" 2>&1 &
   pid=$!
   printf '%s\n' "$pid" >"$st/$u.pid"
