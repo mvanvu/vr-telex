@@ -26,6 +26,7 @@ mod socket;
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use ime_core::{Ready, SharedIme};
 
@@ -145,7 +146,8 @@ impl Config {
 /// - `ready.notify()` is called once clients can reach the frontend: the
 ///   socket listens and the address files are written.
 /// - `Ok(())` is returned only when the frontend is not needed on this
-///   machine: there is neither a Wayland nor an X display.
+///   machine: there is neither a Wayland nor an X display and the daemon
+///   was not started by systemd (`without_display`).
 /// - `Err` on any failure. The daemon then exits with a failure and systemd
 ///   restarts it, all frontends together. The error text is static and
 ///   carries no typed text (SEC-1).
@@ -153,10 +155,33 @@ pub async fn run(ime: SharedIme, ready: Ready) -> ime_core::Result<()> {
     match Config::from_env()? {
         Some(config) => serve(config, ime, ready).await,
         None => {
-            ready.notify();
-            Ok(())
+            let supervised = std::env::var_os("NOTIFY_SOCKET").is_some();
+            without_display(supervised, NO_DISPLAY_WAIT, ready).await
         }
     }
+}
+
+/// How long a start without a display is held before it fails. It stays
+/// below the unit's `TimeoutStartSec=10`; the unit has no start limit
+/// (`StartLimitIntervalSec=0`), so systemd keeps retrying with its back-off.
+const NO_DISPLAY_WAIT: Duration = Duration::from_secs(7);
+
+/// A start with neither a Wayland nor an X display in the environment.
+///
+/// Run by hand that means there is nothing to serve. Under systemd the unit
+/// belongs to a graphical session, so it only means the session has not
+/// handed its display to the user manager yet (a start through D-Bus
+/// activation or `systemctl --user start` can come that early). Reporting
+/// "not needed" then would leave GNOME Shell without an input method for
+/// the whole session; failing makes systemd start the daemon again, with
+/// the environment of that moment. The daemon logs the error text.
+async fn without_display(supervised: bool, wait: Duration, ready: Ready) -> ime_core::Result<()> {
+    if !supervised {
+        ready.notify();
+        return Ok(());
+    }
+    tokio::time::sleep(wait).await;
+    Err("fe-ibus: no display in the environment".into())
 }
 
 #[cfg(test)]
@@ -190,6 +215,40 @@ mod tests {
         };
         let config = Config::from_values(moved, 1000).unwrap().unwrap();
         assert_eq!(config.bus_dir, Path::new("/cfg/ibus/bus"));
+    }
+
+    fn block_on<F: Future>(test: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap()
+            .block_on(test)
+    }
+
+    #[test]
+    fn outside_systemd_a_start_without_a_display_means_not_needed() {
+        block_on(async {
+            let (ready, watch) = Ready::channel();
+            let result = without_display(false, Duration::from_secs(60), ready).await;
+            assert!(result.is_ok());
+            assert!(watch.wait().await, "not needed counts as ready");
+        });
+    }
+
+    #[test]
+    fn under_systemd_a_start_without_a_display_fails_after_a_wait() {
+        block_on(async {
+            let (ready, watch) = Ready::channel();
+            let wait = Duration::from_millis(60);
+            let start = std::time::Instant::now();
+            let error = without_display(true, wait, ready).await.unwrap_err();
+            assert!(
+                start.elapsed() >= wait,
+                "failing at once would be a restart storm"
+            );
+            assert_eq!(error.to_string(), "fe-ibus: no display in the environment");
+            assert!(!watch.wait().await, "the daemon must not report ready");
+        });
     }
 
     #[test]

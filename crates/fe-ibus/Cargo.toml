@@ -16,7 +16,7 @@ zbus = { version = "6.5.0", default-features = false, features = ["tokio", "p2p"
 # Listener, per-connection tasks, send and handshake deadlines.
 tokio = { workspace = true, features = ["net", "rt", "time", "sync", "io-util"] }
 # getuid for the peer check (SEC-8) without `unsafe`.
-rustix.workspace = true
+rustix = { workspace = true, features = ["fs"] }
 
 [features]
 # Test seams only; never enabled by the daemon. `serve_peers_of` admits
