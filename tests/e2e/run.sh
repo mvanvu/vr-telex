@@ -9,8 +9,8 @@
 #   --words N            corpus size (default 5000)
 #   --seed N             corpus seed (default 20261124)
 #   --delay S            seconds between keys (default 0.015)
-#   --scenarios "LIST"   from: password toggle focus focus-kept indicator install
-#                        (default: password toggle focus focus-kept install)
+#   --scenarios "LIST"   from: password toggle focus focus-kept suggest indicator install
+#                        (default: password toggle focus focus-kept suggest install)
 #   --skip-install       skip the install/uninstall scenario (also skipped while install.sh is absent)
 #   --route ibus|fcitx   IM environment of the apps: Ubuntu default (ibus) or GTK_IM_MODULE=fcitx
 #   --out DIR            where run directories go (default target/e2e)
@@ -24,7 +24,7 @@ REPO="$(cd "$HERE/../.." && pwd)"
 . "$HERE/lib.sh"
 
 IME=daemon APPS="term chrome omnibox code code-term" RUNS=3 WORDS=5000 SEED=20261124 DELAY=0.015
-SCENARIOS="password toggle focus focus-kept install" SKIP_INSTALL=0 ROUTE=ibus OUT="$REPO/target/e2e"
+SCENARIOS="password toggle focus focus-kept suggest install" SKIP_INSTALL=0 ROUTE=ibus OUT="$REPO/target/e2e"
 ALLOW_INCOMPLETE=0 OMNI_CHUNK=40
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -168,12 +168,36 @@ check() {  # check <label> <actual file> [extra diff args]
   fi
 }
 
+# ------------------------------------------------------------------ local site (address-bar suggestions)
+# The suggest scenario needs pages Chrome can load, so that its history offers them as inline
+# suggestions: one stdlib HTTP server on 127.0.0.1, and Chrome maps a few host names onto it.
+SITE_PORT="" SITE_HOSTS="github.test youtube.test tinhte.test xn--ng-pma05d708i.test"
+start_site() {
+  guard
+  mkdir -p "$OUTD/site"
+  printf '<!doctype html><meta charset=utf-8><title>e2e site</title>ok\n' > "$OUTD/site/index.html"
+  python3 -u -m http.server 0 --bind 127.0.0.1 --directory "$OUTD/site" >"$LOGS/site.log" 2>&1 &
+  local i
+  for i in $(seq 40); do
+    SITE_PORT=$(grep -o 'port [0-9]*' "$LOGS/site.log" | head -1 | cut -d' ' -f2)
+    [ -n "$SITE_PORT" ] && return 0
+    pause 0.25
+  done
+  echo "local site did not start"; return 1
+}
+case " $SCENARIOS " in *" suggest "*) start_site;; esac
+
 # ------------------------------------------------------------------ Chrome (one browser for every Chrome step)
 CHROME_UP=0
 PORTFILE="$HOME/chrome/DevToolsActivePort"
 start_chrome() {
   [ "$CHROME_UP" = 1 ] && return 0
   guard
+  local rules="" bypass="" h
+  if [ -n "$SITE_PORT" ]; then
+    for h in $SITE_HOSTS; do rules="${rules}MAP $h 127.0.0.1:$SITE_PORT, "; bypass="$bypass;$h"; done
+    rules="${rules}MAP localhost 127.0.0.1, "
+  fi
   cat > "$OUTD/page.html" <<'EOF'
 <!doctype html><meta charset=utf-8><title>vr-talex e2e</title>
 <style>textarea{width:95%;height:180px}#o{width:95%;height:160px;background:#eee}</style>
@@ -191,7 +215,8 @@ EOF
   # navigations carry the typed text and must never leave the machine.
   google-chrome --user-data-dir="$HOME/chrome" --no-first-run --no-default-browser-check --password-store=basic \
     --disable-search-engine-choice-screen --disable-sync --disable-background-networking --disable-component-update \
-    --proxy-server=http://127.0.0.1:9 --host-resolver-rules="MAP * ~NOTFOUND" --remote-debugging-port=0 \
+    --proxy-server=http://127.0.0.1:9 --proxy-bypass-list="${bypass#;}" \
+    --host-resolver-rules="${rules}MAP * ~NOTFOUND" --remote-debugging-port=0 \
     "file://$OUTD/page.html" >"$LOGS/chrome.log" 2>&1 &
   CHROME_PID=$!
   wait_win google-chrome || return 1
@@ -289,6 +314,24 @@ done
 
 # ------------------------------------------------------------------ scenarios
 golden_of() { awk -F'\t' -v k="$1" '$1 == k { print $2; exit }' "$GOLDEN"; }
+set_mode() {  # set_mode VI|EN (the tap reaches the engine only through a focused text field)
+  local i
+  for i in 1 2 3; do
+    [ "$(indicator)" = "$1" ] && return 0
+    page_front; page_eval "t.focus(); 1" >/dev/null
+    $E2E inject --keys TOGGLE >/dev/null; pause 0.5
+  done
+  [ "$(indicator)" = "$1" ] && return 0
+  echo "  set_mode $1: indicator [$(indicator)], focus [$(focused_class)]"; return 1
+}
+# word:key — type the word at a human pace, wait for the suggestion, then press the key; the address
+# the tab ends on must be the one EN mode reaches. word:key=address[|address] — VI mode only
+# (Vietnamese words): the tab must end on one of those addresses ("search:<query>" for a search).
+# xn--ng-pma05d708i is "đường". E2E_SUGGEST_CASES / E2E_SUGGEST_VI_CASES replace the lists.
+SUGGEST_CASES="${E2E_SUGGEST_CASES-git:Return git:Tab you:Return you:Tab loc:Return loc:Tab tinh:Return tinh:Tab}"
+SUGGEST_VI_CASES="${E2E_SUGGEST_VI_CASES-dduwowngf:Return=http://xn--ng-pma05d708i.test/
+  dduw:Tab=http://xn--ng-pma05d708i.test/ tieengs:Return=search:tiếng vieetj:Return=search:việt}"
+SUGGEST_DELAY=0.08
 
 for sc in $SCENARIOS; do
   case "$sc" in
@@ -378,6 +421,65 @@ for sc in $SCENARIOS; do
       d1="window switch: [$got1] expected [$exp1]"; d2="click elsewhere (focus moved to #$clicked): [$got2] expected [$exp2]"
       if [ "$got1" = "$exp1" ] && [ "$got2" = "$exp2" ] && [ "$clicked" = o ]; then result AC-3 PASS "$d1; $d2"
       else result AC-3 FAIL "$d1; $d2"; fi;;
+    suggest)  # FR-8: with an inline suggestion in the address bar, Enter goes to it and Tab accepts it,
+              # in VI mode exactly as Chrome does in EN mode (no engine involvement)
+      [ "$IME" = none ] && { result FR-8 SKIP "no engine"; continue; }
+      [ -n "$SITE_PORT" ] || { result FR-8 FAIL "local site did not start"; continue; }
+      start_chrome || { result FR-8 FAIL "chrome did not start"; continue; }
+      # Two typed visits per page make each one an inline suggestion for its prefix.
+      tab=$($E2E cdp "$PORTFILE" new about:blank)
+      for u in $(for h in $SITE_HOSTS; do echo "http://$h/"; done) "http://localhost:$SITE_PORT/"; do
+        for k in 1 2; do $E2E cdp "$PORTFILE" navigate "$tab" "$u" >/dev/null; pause 0.7; done
+      done
+      $E2E cdp "$PORTFILE" close "$tab" >/dev/null; pause 1
+      # What kind of field the address bar reports (IBus purpose/hints, as GNOME Shell forwards them).
+      tab=$($E2E cdp "$PORTFILE" new about:blank); activate google-chrome; pause 0.7
+      $E2E inject --keys down:Control_L l up:Control_L SLEEP:0.5 >/dev/null
+      purpose=$(sh_value 'Main.inputMethod._purpose + "/" + Main.inputMethod._hints')
+      $E2E inject --keys Escape >/dev/null; $E2E cdp "$PORTFILE" close "$tab" >/dev/null
+      declare -A seen=()
+      ok=1 detail="address bar purpose/hints $purpose" bad=0
+      for mode in EN VI; do
+        set_mode "$mode" || { ok=0; detail="$detail; could not switch to $mode"; break; }
+        cases=$SUGGEST_CASES; [ "$mode" = VI ] && cases="$cases $SUGGEST_VI_CASES"
+        for c in $cases; do
+          c=${c%%=*} word=${c%:*} how=${c#*:}
+          tab=$($E2E cdp "$PORTFILE" new about:blank); activate google-chrome; pause 0.7
+          # One injection for the whole case: ending an injection removes its keyboard from the
+          # seat, which takes the focus from the address bar and commits the word before the key
+          # under test. Screenshots are taken alongside, in the pauses.
+          keys=(down:Control_L l up:Control_L SLEEP:0.4)
+          for ((j = 0; j < ${#word}; j++)); do keys+=("${word:j:1}"); done
+          keys+=(SLEEP:1.5)
+          # Tab takes the suggestion and moves the focus to the suggestion list; Shift+Tab brings it
+          # back unchanged and Return then goes to whatever Tab left in the address bar.
+          [ "$how" = Tab ] && keys+=(Tab SLEEP:1.5 down:Shift_L Tab up:Shift_L SLEEP:0.4)
+          keys+=(Return)
+          t=$(python3 -c "print(1.0 + 0.4 + ${#word} * $SUGGEST_DELAY)")
+          ( pause "$t"; screenshot "$OUTD/suggest-$mode-$word-$how-1typed.png"
+            [ "$how" = Tab ] && { pause 1.5; screenshot "$OUTD/suggest-$mode-$word-$how-2tab.png"; } ) &
+          $E2E inject --delay "$SUGGEST_DELAY" --keys "${keys[@]}" >/dev/null
+          wait $!
+          pause 1.5
+          seen[$mode:$c]=$($E2E cdp "$PORTFILE" url "$tab")
+          $E2E cdp "$PORTFILE" close "$tab" >/dev/null
+          echo "  suggest $mode $c -> ${seen[$mode:$c]}"
+        done
+      done
+      for c in $SUGGEST_CASES; do
+        en=${seen[EN:$c]:-} vi=${seen[VI:$c]:-}
+        # Without an inline suggestion in EN mode the case proves nothing: the setup is broken.
+        case "$en" in search:*|""|about:*) ok=0; detail="$detail; $c: no suggestion in EN mode [$en]"; continue;; esac
+        [ "$en" = "$vi" ] || { ok=0; bad=$((bad + 1)); detail="$detail; $c: VI went to [$vi], EN to [$en]"; }
+      done
+      # Vietnamese words, which EN mode cannot type: VI must reach the expected address.
+      for c in $SUGGEST_VI_CASES; do
+        want=${c#*=} c=${c%%=*} vi=${seen[VI:${c%%=*}]:-}
+        case "|$want|" in *"|$vi|"*) ;; *) ok=0; bad=$((bad + 1)); detail="$detail; $c: VI went to [$vi], expected [$want]";; esac
+      done
+      n=$(( $(echo $SUGGEST_CASES $SUGGEST_VI_CASES | wc -w) ))
+      [ "$ok" = 1 ] && result FR-8 PASS "$detail; $n cases, VI = EN / expected" \
+                    || result FR-8 FAIL "$detail; $bad of $n cases differ";;
     focus-kept)  # AC-3 with the keyboard kept through the focus change: a word in progress survives, once,
       # a window switch out of Chrome, and in gnome-terminal (GTK3 im-wayland, committed by Mutter through the
       # shell) a window switch, a click on another window and Ctrl+Space to the US layout. Each case runs
