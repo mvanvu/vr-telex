@@ -92,6 +92,20 @@ impl SharedIme {
         self.lock().mode()
     }
 
+    pub fn enabled(&self) -> bool {
+        self.lock().enabled()
+    }
+
+    /// See [`Ime::set_enabled`].
+    pub fn set_enabled(&self, on: bool) {
+        self.lock().set_enabled(on);
+    }
+
+    /// What a switch-off left for the context: the commit of its word.
+    pub fn take_pending(&self, id: CtxId) -> Vec<Action> {
+        self.call(id, |ime| ime.take_pending(id))
+    }
+
     pub fn subscribe_mode(&self) -> ModeWatch {
         self.lock().subscribe_mode()
     }

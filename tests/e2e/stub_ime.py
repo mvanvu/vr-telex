@@ -68,7 +68,7 @@ def text_v(s):
 
 
 ENGINE = d.Variant("(sa{sv}ssssssssussssssss)", (
-    "IBusEngineDesc", {}, "vr-talex", "Vietnamese (Telex)", "e2e stub engine", "vi", "", "", "", "us", 0,
+    "IBusEngineDesc", {}, "vr-talex", "Telex", "e2e stub engine", "vi", "", "", "", "us", 0,
     "", "VI", "", "", "", "", "", ""))
 
 
