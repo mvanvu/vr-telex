@@ -38,3 +38,43 @@ Mixed case covered (Tiếng, ĐƯỜNG, Đường, QUỐC, GitHub, HTTPS). The g
 | SEC-25 | pass | `cargo build --locked --workspace` finished OK (build_locked.log), Cargo.lock unchanged |
 | SEC-26 | not checked here beyond build; deny.toml present, cargo-deny not run (not in my brief) | n-o |
 | SEC-27 | pass | `#![forbid(unsafe_code)]` in all 6 crate roots (ime-core, telex-core, vr-talex main.rs, fe-fcitx, fe-xim, fe-ibus) plus workspace lint unsafe_code=forbid |
+
+## QC T10
+Tree tested: worktree /home/rainy/DEV/vr-talex-wt-T10, branch t10-free-order, uncommitted changes on 8bb3a65 (telex-core lib.rs, tests/rules.rs, golden tsv + README, tools/golden-gen/gen.py). Engine: cargo (run-heavy.sh) and a path-dependent probe crate. Artifacts: $TEAM_WS/qa-artifacts/T10-qc/ (cargo-test.log, probe/, d18-cases.log, d18-base-tree.log, t2-regression.log).
+
+Verdict: QC_PASS
+
+### AC-1 golden run
+`cargo test -p telex-core --locked --no-fail-fast`: rc=0; golden_list 1 passed (34433 non-comment rows in telex_golden.tsv); rules.rs 26 passed; 0 failed.
+
+### D18 own cases (54 typed, none from the golden file; d18-cases.log)
+42 matched my expectation. The 12 DIFF are all wrong expectations of mine (explained), not engine defects. Same 54 run against the pre-T10 tree (d18-base-tree.log): 21 DIFF, so D18 moved 10 cases from not-composed to composed.
+| Input | Got | Note |
+|---|---|---|
+| Vieest, Vieets, vieset, vieest, vieets | Viết / viết | PASS (user examples; base tree left vieset raw) |
+| tiengse, tieengs | tiếng | PASS |
+| Ddeefn, deefnd, ddenf, dedfn | Đền, đền, đèn, đèn | PASS |
+| cooj, coj, coj+o (cojo) | cộ, cọ, cộ | PASS |
+| nguoiwf, nguowif, nguwowif | người | PASS |
+| Tiếng Việt rất đẹp (2 typing orders), Đường đến trường, người Việt Nam (2 orders) | correct sentences | PASS |
+| Vieets<, hocj<, Ddenf< | Viêt, hoc, Đen | PASS (BackSpace removes last visible char, hat kept) |
+| class, classes, github, windows, Windows, assess, process, good, food, looks | unchanged | PASS passthrough |
+| dd, ddd, toan, xin chaof ban, Hoaf Nooij | đ, dd, toan, xin chào ban, Hoà Nội | PASS |
+| tiesng, tiengs | tiéng | my expectation wrong (only one e typed) |
+| denfd, Ddenf | đèn, Đèn | NOTE: brief says denfd gives đền; only one e is typed so ê cannot appear, result đèn is correct. deefnd gives đền |
+| Vieest<, Vieet<s, tiengse<<, denfd<, vieest<s | Viế, Viế, tiế, đè, viês | expectation wrong; pop deletes last visible char (viêt+s then revert gives viês, usual Telex double-tone revert) |
+| boss | bos | double-s tone revert; identical in the pre-T10 tree, not D18 |
+| Ddwuowngf..., "Vieets Nam" | - | typos in my own inputs |
+
+### Regression: T2 probe, 40 cases
+Run against the worktree (t2-regression.log) vs T2-qc/probe2.log: byte-identical results for all 40, including 1 known DIFF (hoaj gives hoạ, my old expectation of họa). No case changed on purpose; none regressed.
+
+## Rule check T10
+| Rule | Result | Evidence |
+|---|---|---|
+| AC-1 golden 34433 cases + rules tests | PASS | cargo-test.log: 1 golden passed, 26 rules passed |
+| D18 free-order circumflex/đ | PASS | d18-cases.log, user examples and sentences |
+| D18 BackSpace mid-word after late hat | PASS | Vieets<, tiengse<< |
+| Passthrough class/github/windows | PASS | d18-cases.log |
+| T2 regression (40 cases) | PASS | t2-regression.log identical to probe2.log |
+| No repo files modified | PASS | only files under qa-artifacts |
