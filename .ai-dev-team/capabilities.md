@@ -13,3 +13,6 @@
 - Install sandbox harness: env -i throwaway HOME/XDG + dbus-run-session with a private config (only the sandbox service dir) + GSETTINGS_BACKEND=keyfile + stubs (systemctl --user mini manager with Type=notify emulation, fcitx5 / fcitx5-remote, fake-ime python daemon owning org.fcitx.Fcitx5 and writing IBus address files) — tests/install/run.sh, tests/install/stubs/ (T8)
 - Installer shared helpers (bus owner pid, machine id, gsettings restore-to-default, backup manifest load/restore) — packaging/common.sh (T8)
 - Frontend readiness handle `ime_core::{Ready, ReadyWatch}` (`Ready::channel`, `notify`, `wait`) — crates/ime-core/src/ready.rs (T4)
+- e2e harness: `tests/e2e/run.sh` (headless GNOME Shell sandbox, RemoteDesktop key injection, readback from gnome-terminal / Chrome DevTools / VS Code, character diff, SEC-1 leak scan) — T9
+- stdlib D-Bus client/server for tests: `tests/e2e/dbuslite.py` — T9
+- stub IBus engine for harness checks: `tests/e2e/stub_ime.py` — T9
