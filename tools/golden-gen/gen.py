@@ -158,6 +158,46 @@ def cap(s):
     return s[:1].upper() + s[1:]
 
 
+HAT_BASE = {"â": "a", "ê": "e", "ô": "o"}
+
+
+def late_hat_cases(syls):
+    """D18: circumflex key typed late, on the matching earlier vowel.
+
+    Three placements: after the final (`vietej`), tone key then hat key (`tiengse`),
+    hat key between the tone and the final (`vieset`).
+    """
+    out = {"final": [], "tone_first": [], "after_tone": []}
+    for s in syls:
+        hats = [c for c in s.nuc if c in HAT_BASE]
+        if len(hats) != 1:
+            continue
+        head = keys_of(s.init) + "".join(HAT_BASE.get(c) or LETTER_KEYS.get(c, c) for c in s.nuc)
+        fin, hat = keys_of(s.fin), HAT_BASE[hats[0]]
+        # No final and the hat vowel last in the nucleus: the key would sit next to its vowel,
+        # which is the ordinary doubled key, not a free-order case.
+        if fin or s.nuc[-1] not in HAT_BASE:
+            out["final"].append((head + fin + hat + s.tone, s))
+        if s.tone:
+            out["tone_first"].append((head + fin + s.tone + hat, s))
+            if fin:
+                out["after_tone"].append((head + s.tone + hat + fin, s))
+    return out
+
+
+def late_d_cases(syls):
+    """D18: a later d turns the initial d into đ (initial đ only)."""
+    out = {"final": [], "tone_first": []}
+    for s in syls:
+        if s.init != "đ":
+            continue
+        rest = nucleus_keys(s.nuc) + keys_of(s.fin)
+        out["final"].append(("d" + rest + "d" + s.tone, s))
+        if s.tone:
+            out["tone_first"].append(("d" + rest + s.tone + "d", s))
+    return out
+
+
 ENGLISH = """class https http git windows release linux ubuntu gnome github gitlab docker kubernetes
 python rust cargo npm node react vue angular typescript javascript json yaml toml html css sql
 bash shell terminal commit branch merge rebase push pull clone fetch stash checkout diff patch
@@ -221,12 +261,13 @@ def skeleton_valid(sk):
 def english_safe(word):
     """True when no Telex reading of the word can be a valid Vietnamese syllable."""
     keyish = [i for i, c in enumerate(word) if c in "sfrxjzw"]
-    doubles = [i for i in range(len(word) - 1) if word[i] == word[i + 1] and word[i] in "aeod"]
+    # D18: any later a/e/o/d that repeats an earlier letter may act as a free-order key.
+    doubles = [i for i in range(1, len(word)) if word[i] in "aeod" and word[i] in word[:i]]
     if not keyish and not doubles:
         return True
     ops = [("key", i) for i in keyish] + [("wdel", i) for i in keyish if word[i] == "w"] \
         + [("dbl", i) for i in doubles]
-    if len(ops) > 10:
+    if len(ops) > 16:
         return True
     for mask in range(1 << len(ops)):
         chars = list(word)
@@ -241,7 +282,7 @@ def english_safe(word):
                     else:
                         drop.add(i)
                 else:
-                    drop.add(i + 1)
+                    drop.add(i)
         if skeleton_valid("".join(c for i, c in enumerate(chars) if i not in drop)):
             return False
     return True
@@ -298,17 +339,68 @@ def main():
         ("Vieetj", "Việt"), ("VIEETJ", "VIỆT"), ("vieetj", "việt"), ("vieejt", "việt"),
     ])
 
+    seen_before_d18 = set(seen)
+    # D18: free-order circumflex and đ.
+    hat = late_hat_cases(syls)
+    dd = late_d_cases(syls)
+
+    def sample(items, mod, salt):
+        return [(k, s) for k, s in items if h(salt + k) % mod == 0]
+
+    hat_titles = {
+        "final": "Circumflex key typed after the final consonant, tone last (D18: vietej, vietes)",
+        "tone_first": "Tone key, then the circumflex key at the very end (D18: tiengse)",
+        "after_tone": "Tone key, circumflex key, then the final consonant (D18: vieset)",
+    }
+    hat_mod = {"final": 6, "tone_first": 6, "after_tone": 5}
+    for kind in ("final", "tone_first", "after_tone"):
+        add(hat_titles[kind], [(k, s.text) for k, s in sample(hat[kind], hat_mod[kind], "h" + kind)])
+        add(hat_titles[kind] + ", capitalised sample",
+            [(cap(k), cap(s.text)) for k, s in sample(hat[kind], 40, "c" + kind)])
+        add(hat_titles[kind] + ", ALL CAPS sample",
+            [(k.upper(), s.text.upper()) for k, s in sample(hat[kind], 90, "u" + kind)])
+    d_titles = {
+        "final": "Later d after the final consonant, tone last (D18: duowngd, dinhd)",
+        "tone_first": "Tone key, then the later d at the very end (D18)",
+    }
+    d_mod = {"final": 3, "tone_first": 4}
+    for kind in ("final", "tone_first"):
+        add(d_titles[kind], [(k, s.text) for k, s in sample(dd[kind], d_mod[kind], "d" + kind)])
+        add(d_titles[kind] + ", capitalised sample",
+            [(cap(k), cap(s.text)) for k, s in sample(dd[kind], 12, "cd" + kind)])
+        add(d_titles[kind] + ", ALL CAPS sample",
+            [(k.upper(), s.text.upper()) for k, s in sample(dd[kind], 30, "ud" + kind)])
+    add("Hand-written D18 cases", [
+        ("vieset", "viết"), ("tiengse", "tiếng"), ("vietej", "việt"), ("tieeng", "tiêng"),
+        ("duowngd", "đương"), ("duowngfd", "đường"), ("dinhd", "đinh"), ("Dinhd", "Đinh"), ("DINHD", "ĐINH"),
+        ("Vieset", "Viết"), ("VIESET", "VIẾT"), ("Tiengse", "Tiếng"), ("Duowngd", "Đương"), ("Duowngfd", "Đường"),
+        ("ana", "ân"), ("dad", "đa"), ("toio", "tôi"), ("bese", "bế"), ("viete", "viêt"),
+    ])
+
+    # Words that stay raw, and words whose keys now form a Vietnamese syllable (D18).
+    new_keys = {}
+    for kind in hat:
+        for k, s in hat[kind]:
+            new_keys[k] = s.text
+    for kind in dd:
+        for k, s in dd[kind]:
+            new_keys[k] = s.text
     rejected = []
     eng = []
+    now_vi = []
     for w in dict.fromkeys(ENGLISH):
         if english_safe(w) and seen.get(w, w) == w:
             eng.append(w)
         else:
             rejected.append(w)
+            if w in new_keys and w not in seen_before_d18:
+                now_vi.append((w, new_keys[w]))
     pairs = [(w, w) for w in eng]
     pairs += [(cap(w), cap(w)) for w in eng if h(w) % 3 == 0]
     pairs += [(w.upper(), w.upper()) for w in eng if h(w) % 5 == 0]
-    add("English / code words passed through unchanged", pairs)
+    add("English / code words passed through unchanged (stay raw under D18)", pairs)
+    add("english_now_vietnamese: English words that form a valid syllable under D18",
+        now_vi + [(cap(k), cap(v)) for k, v in now_vi])
 
     total = sum(len(r) for _, r in sections)
     with open(out, "w", encoding="utf-8", newline="\n") as f:

@@ -1,7 +1,8 @@
 //! Telex composition engine: turns the keys of one word into Vietnamese text.
 //!
 //! Pure and I/O free. Rules: spec §4, decisions D5 (standard Telex, modern tone
-//! placement) and D13 (tone placement details).
+//! placement), D13 (tone placement details) and D18 (free-order `a`/`e`/`o`
+//! circumflex and `d` → `đ`).
 //!
 //! The engine keeps the word as letters (lower case, with vowel marks, without
 //! tone) plus one tone for the word. After every key the letters must still be
@@ -197,8 +198,16 @@ impl Composer {
                 let mut before = String::new();
                 self.render_to(&mut before);
                 if before == self.text {
-                    self.mode = Mode::Viet;
-                    self.resync_raw();
+                    if parse(&self.letters, self.tone).is_some() {
+                        self.mode = Mode::Viet;
+                        self.resync_raw();
+                    } else {
+                        // An undone mid-word `w` leaves letters no syllable
+                        // fits (`twnw` → `twn`): the shown text is raw keys.
+                        wipe_string(&mut self.raw);
+                        self.raw.push_str(&self.text);
+                        self.restore_raw();
+                    }
                 }
                 wipe_string(&mut before);
             }
@@ -207,11 +216,12 @@ impl Composer {
                 self.raw.pop();
                 // The shortened raw keys may form a syllable again (`acf` → `ac`);
                 // take that state only when it shows the same text.
-                let keys: Vec<char> = self.raw.chars().collect();
+                let mut keys: Vec<char> = self.raw.chars().collect();
                 let mut again = Composer::new();
                 for &k in &keys {
                     again.push(k);
                 }
+                keys.fill('\0');
                 if again.text == self.text {
                     std::mem::swap(self, &mut again);
                 }
@@ -377,6 +387,22 @@ impl Composer {
                 }
                 _ => {}
             },
+            // D18: a later `d` turns the initial `d` into `đ` (`dinhd` → đinh).
+            ('d', _) if self.letters.len() > 1 => match self.letters[0].ch {
+                'd' => {
+                    let mut trial = self.letters.clone();
+                    trial[0].ch = 'đ';
+                    if self.try_letters(trial) {
+                        return Step::Ok;
+                    }
+                }
+                // Undo by repeat, only right after the key that made the `đ`.
+                'đ' if self.prev_key_is(k) => {
+                    self.letters[0].ch = 'd';
+                    return Step::Literal(ch);
+                }
+                _ => {}
+            },
             _ => {}
         }
 
@@ -384,31 +410,25 @@ impl Composer {
         self.validated()
     }
 
-    /// `aa` → â, `ee` → ê, `oo` → ô; a repeat undoes it. The two keys must be
-    /// adjacent, otherwise foreign words such as `reset` or `photo` would turn
-    /// into valid syllables.
+    /// `aa` → â, `ee` → ê, `oo` → ô, also when other keys come between (D18:
+    /// `vieset` → viết) as long as the result is a valid syllable; otherwise
+    /// the key is a plain letter. Only an adjacent repeat undoes the hat.
     fn circumflex(&mut self, k: char, ch: char, s: Syllable) -> Step {
         let hat = match k {
             'a' => 'â',
             'e' => 'ê',
             _ => 'ô',
         };
-        let doubled = self
-            .raw
-            .chars()
-            .rev()
-            .nth(1)
-            .is_some_and(|p| p.to_ascii_lowercase() == k);
-        if !doubled {
-            self.letters.push(Letter::new(k, ch.is_ascii_uppercase()));
-            return self.validated();
-        }
         if let Some(i) = (s.ns..s.ne).rev().find(|&i| self.letters[i].ch == k) {
             let mut trial = self.letters.clone();
             trial[i].ch = hat;
             if self.try_letters(trial) {
                 return Step::Ok;
             }
+        }
+        if !self.prev_key_is(k) {
+            self.letters.push(Letter::new(k, ch.is_ascii_uppercase()));
+            return self.validated();
         }
         if let Some(i) = (s.ns..s.ne).rev().find(|&i| self.letters[i].ch == hat) {
             self.letters[i].ch = k;
@@ -488,6 +508,15 @@ impl Composer {
         }
         self.letters.push(Letter::new('w', upper));
         self.validated()
+    }
+
+    /// The key typed just before the current one (already in `raw`) was `k`.
+    fn prev_key_is(&self, k: char) -> bool {
+        self.raw
+            .chars()
+            .rev()
+            .nth(1)
+            .is_some_and(|p| p.to_ascii_lowercase() == k)
     }
 
     fn try_letters(&mut self, trial: Vec<Letter>) -> bool {
