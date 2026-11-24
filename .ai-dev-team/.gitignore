@@ -1,0 +1,11 @@
+**/qa-artifacts/
+**/sheets/
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.webp
+**/*.gif
+**/*.mp4
+**/*.webm
+/local.md
+**/.task-base/
