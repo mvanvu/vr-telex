@@ -19,7 +19,8 @@ STUBS=$HERE/stubs
 SCENARIOS=(fresh_fcitx5 fresh_no_fcitx5 empty_sources broken_daemon root_refused
   no_cargo ibus_refused activation_shadow uninstall_without_backup uninstall_not_installed
   edited_after_install failed_restore symlinked_config fcitx5_unit fcitx5_stuck
-  reinstall_backup_deleted special_home rerun_failure bad_xdg edited_then_reinstall)
+  reinstall_backup_deleted special_home rerun_failure bad_xdg edited_then_reinstall
+  record_write_fails)
 # A HOME with a space, an ampersand and a quote (special_home scenario).
 SPECIAL_HOME_NAME="h o&m'e"
 
@@ -621,6 +622,46 @@ t_edited_then_reinstall() {
   check "uninstall exits 0" run_uninstall
   check "pre-install ~/.xinputrc restored" cmp -s "$T8_SANDBOX/pre.xinputrc" "$HOME/.xinputrc"
   check "kept copy still there" [ -f "$saved" ]
+}
+
+t_record_write_fails() {
+  # Re-check finding: recording what install writes fails (disk full in the
+  # backup dir). The rollback must leave no vr-talex file behind and print
+  # no "was not written by vr-talex" warning. A cp wrapper fails only the
+  # copy into backup/installed/ for .xinputrc.
+  gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us')]"
+  fcitx5 -d
+  mkdir -p "$T8_SANDBOX/fullstub"
+  cat >"$T8_SANDBOX/fullstub/cp" <<'EOF'
+#!/bin/sh
+# Fails like a full disk when the copy goes into backup/installed/ and the
+# source is the installed ~/.xinputrc content.
+src= dst=
+for a in "$@"; do
+  case "$a" in -*) ;; *) src=$dst; dst=$a ;; esac
+done
+case "$dst" in
+  */vr-talex/backup/installed/*)
+    if grep -q "run_im none" "$src" 2>/dev/null; then
+      echo "cp: error writing $dst: No space left on device" >&2
+      exit 1
+    fi
+    ;;
+esac
+exec /usr/bin/cp "$@"
+EOF
+  chmod +x "$T8_SANDBOX/fullstub/cp"
+  snap "$T8_SANDBOX/pre.snap" noibus
+  local out rc=0
+  out=$(PATH="$T8_SANDBOX/fullstub:$PATH" run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install exits non-zero" [ "$rc" -ne 0 ]
+  check "rolled back" grep -qi 'rolled back' <<<"$out"
+  check "no wrong \"not written by vr-talex\" warning" sh -c "! printf '%s' \"\$1\" | grep -q 'not written by vr-talex'" _ "$out"
+  check "~/.xinputrc not left behind" [ ! -e "$HOME/.xinputrc" ]
+  snap "$T8_SANDBOX/post.snap" noibus
+  check "everything restored" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
+  check "fcitx5 runs again" has_owner org.fcitx.Fcitx5
 }
 
 in_sandbox() {

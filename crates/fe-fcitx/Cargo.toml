@@ -8,6 +8,20 @@ publish.workspace = true
 
 [dependencies]
 ime-core.workspace = true
+# Session-bus client, low level only (no object server, no tracing): every call
+# is dispatched by this crate so that one client's calls stay in order (B2).
+# Same version as fe-ibus (T5).
+zbus = { version = "6.5.0", default-features = false, features = ["tokio"] }
+# Already in the tree through zbus; only the `Stream` trait to read the bus.
+futures-core = { version = "0.3.34", default-features = false }
+# Already in the tree through zbus; the bound on message bodies.
+serde = { version = "1.0.229", default-features = false }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+# getuid() for the same-user check on callers (SEC-8).
+rustix.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
 
 [lints]
 workspace = true

@@ -154,3 +154,35 @@ Verdict: QC_PASS. Same sandbox mechanism; script `qa-artifacts/T8-qc/qc_extra.sh
 | a: pre-existing files | PASS: all byte-identical, snapshot identical, selection back to fr | logs/a_preexisting.log |
 | d: install x2, uninstall x2 | PASS: no error, no leftovers | logs/d_twice.log |
 | e: symlinked ~/.xinputrc | PASS: target intact, symlink back after uninstall | logs/e_symlink.log |
+
+## QC T6 — QC_PASS
+Engines: Bash, python3 (dbuslite client), headless gnome-shell + gnome-terminal (GTK_IM_MODULE=fcitx); no browser needed. Daemon built from the worktree (cargo build --locked, up to date). All runs in isolated sessions (dbus-run-session, throwaway HOME/XDG); live fcitx5 pid 6881 running before and after every run.
+Artifacts: qa-artifacts/T6-qc/ (smoke_qc.sh, smoke_qc.log, bus_qc.sh, bus_qc.py, diff-run*.txt, typed*.txt.*, toggle.txt).
+
+| Case | Evidence | Result |
+|---|---|---|
+| AC-2 fcitx route, run 1 | 302 words, 27 lines, 20 canaries, 110 typed in EN mode, 2272 keys at mean 15.1 ms/key into gnome-terminal; expected 1880 chars, got 1880; lost 0, extra 0, replaced 0 | PASS |
+| AC-2 run 2 | same corpus, 15.0 ms/key; lost 0, extra 0, replaced 0 | PASS |
+| AC-3 window switch (FocusOut) | own client: `vieetj` then FocusOut -> CommitString ["việt"] once | PASS |
+| AC-3 Reset | `xinf` then Reset -> ["xìn"] once; later FocusOut commits nothing | PASS |
+| AC-3 FocusOut then DestroyIC | ["chào"] once, none on destroy | PASS |
+| AC-7 password | SetCapability(Preedit+Password): `matkhau1s` 9 keys all unhandled, 0 signals | PASS |
+| AC-7 caps change mid-word | commits "việt" first, next key unhandled | PASS |
+| SEC-9 foreign calls | client B on A's context: FocusIn/FocusOut/Reset/SetCapability/ProcessKeyEvent/DestroyIC/SetSurroundingText all AccessDenied; A on B's context AccessDenied; guessed paths AccessDenied | PASS |
+| SEC-9 eavesdrop | B with match rules (all signals, path, interface) receives 0 signals of A (only the bus's own NameAcquired, filtered); A got its own 8 | PASS |
+| SEC-1 | daemon stdout+stderr 0 lines, 0 typed-word hits (both runs); 0 sandbox files with typed words besides the intended typed outputs | PASS |
+| Toggle Ctrl+Shift tap via fcitx | toggle, `vieetj `, toggle, `vieetj` -> file `vieetj việt` | PASS |
+
+## Rule check T6
+| Rule | Result | Evidence |
+|---|---|---|
+| AC-2 | pass | 2 runs, 0 lost/extra/replaced |
+| AC-3 | pass | 3 scenarios, word committed once |
+| AC-7 | pass | matkhau1s passthrough |
+| SEC-1 | pass | 0 hits |
+| SEC-9 | pass | AccessDenied and no signal leakage |
+| BASE-14/15 | pass | background run, no mass kill, tagged cleanup |
+| BASE-17 | n-a | no data committed to a shared DB |
+| D2/SEC-29 | pass | isolated sessions only; fcitx5 6881 alive before/after |
+
+Notes: the committed harness `run.sh --route fcitx --ime daemon` cannot be used (it waits for the IBus shell-extension indicator: "engine did not connect to the shell"); a copy of the developer's smoke plus the harness corpus/inject/diff tools was used instead. Not a T6 defect. Debug build only; no repo files modified.

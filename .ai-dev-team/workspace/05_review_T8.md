@@ -123,3 +123,20 @@ Scenario: put_file writes ~/.xinputrc (`run_im none`, absent before install) →
 | AC-6 | pass (file/keyfile) | fresh_*, edited_after_install, symlinked_config, fcitx5_unit, special_home; live behaviour is T9/O1 |
 | SEC-23 | pass (shellcheck n-o) | no new `rm -rf`; the new rm targets are `$tmp/entry` (a mktemp dir) and dst only when it equals the installed copy |
 The other rows are unchanged from round 0.
+
+---
+
+# Re-check quick pass 1
+
+Verdict: **APPROVED**
+
+Read: `git diff -- install.sh packaging/common.sh tests/install/run.sh` (against 6a1905e), the "Quick pass 1" note in 04_dev_T8.md, qa-artifacts/T8/red2.log (record_write_fails failed 3 checks before the fix) and run2.log (21/21 PASS). `bash -n` passes on install.sh and packaging/common.sh.
+
+The round-1 minor is fixed. install_managed (install.sh:160-165) now records the content it is about to write, with its mode, before put_file runs. record_installed (common.sh:322-332) writes a temp file in backup/installed/, then chmods it and renames it into place; on failure it removes the temp file and returns 1. Traced:
+- The record fails → install dies before dst is written → rollback finds dst unchanged (absent, or equal to the backup) → nothing is left behind and no wrong warning is printed. Test: record_write_fails.
+- The record succeeds and the write fails → dst is still the original → `same_entry dst bak` (present) or `exists dst` false (absent) → nothing is touched.
+- Normal path → put_file writes the same bytes and mode → `same_entry dst inst` holds → uninstall removes or restores as before. A re-run with an unchanged template does not record again.
+
+Note, no finding: an upgrade re-run whose new template is recorded but then fails to write leaves dst holding the old vr-talex content, which no longer matches the record. The rollback or uninstall then moves that file aside as `.vr-talex-saved-*` with a warning. This only produces an extra copy and loses no data, and it needs a write failure right after a successful record.
+
+No new findings. The rule-check rows are unchanged from fix round 1.
