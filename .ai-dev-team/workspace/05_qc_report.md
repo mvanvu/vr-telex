@@ -186,3 +186,40 @@ Artifacts: qa-artifacts/T6-qc/ (smoke_qc.sh, smoke_qc.log, bus_qc.sh, bus_qc.py,
 | D2/SEC-29 | pass | isolated sessions only; fcitx5 6881 alive before/after |
 
 Notes: the committed harness `run.sh --route fcitx --ime daemon` cannot be used (it waits for the IBus shell-extension indicator: "engine did not connect to the shell"); a copy of the developer's smoke plus the harness corpus/inject/diff tools was used instead. Not a T6 defect. Debug build only; no repo files modified.
+
+## QC T5 — QC_PASS (with D26 measurement; code-term loss reproduced, see below)
+Build tested: worktree /home/rainy/DEV/vr-talex-wt-T5, base 7759c41 + uncommitted fe-ibus, `cargo build --release --locked` (target/release/vr-talex). Harness: copy of tests/e2e under qa-artifacts/T5-qc/tree (only change: gpuAcceleration hook for D26b). Isolated sessions only; live fcitx5 pid 6881 before and after. Logs: qa-artifacts/T5-qc/.
+
+| Case | Status | Evidence |
+|---|---|---|
+| AC-2 term 300w, 15 ms, 2 runs | pass | 1947/1947 chars, lost 0 extra 0 replaced 0, both runs (mean 15.0-15.1 ms/key) |
+| AC-2 chrome | pass | same, 0/0/0 both runs |
+| AC-2 omnibox | pass | same, 0/0/0 both runs |
+| AC-2 code (editor) | pass | same, 0/0/0 both runs |
+| AC-3 window switch, click away | pass | [việt]=[việt]; [đường]=[đường] |
+| AC-4 toggle + Ctrl+Shift+T/P/C/V | pass | VI->EN 4 ms, EN->VI 3 ms; combos leave mode VI; page saw P/C/V; T opened a tab |
+| AC-7 password | pass | field got matkhau1s raw |
+| SEC-1 leak scan | pass | 60 tokens, 521 files, 293 journal lines, 0 hits (also 0 hits in every D26 run) |
+| AC-9 (restart) | pass | daemon stopped and restarted in sandbox with shell running: back to vr-talex|VI in 0.28 s (limit 5 s), "Việt nam" typed correctly after |
+| SEC-6 | pass | socket dir 0700, socket 0600, both owned by the user |
+| SEC-8 | pass | address file 0600, IBUS_ADDRESS=unix:path=<runtime>/vr-talex/ibus,guid=..., IBUS_DAEMON_PID = daemon pid; symlink at address-file path: daemon exits rc 1 "cannot write the address file safely", victim file unchanged; symlink at the .tmp path: victim unchanged, daemon works |
+| AC-10 | not-tested here | INCOMPLETE by design (D24, unit tests) |
+
+### D26 measurement (VS Code integrated terminal, 100 words = 934 chars)
+| Variant | Result |
+|---|---|
+| (a) default, 15 ms, run 1 / run 2 | lost 17 / lost 15, extra 0, replaced 0 |
+| (b) gpuAcceleration "off", 15 ms, run 1 / run 2 | lost 16 / lost 14, extra 0, replaced 0 |
+| (c) 20 ms (mean 20.4) | lost 90 (noisy, worse than 15 ms) |
+| (c) 30 ms | lost 0 |
+| (c) 40 ms | lost 0 |
+Reading: GPU setting makes no difference (~1.6% loss either way, so not the GL renderer); threshold lies between 20 and 30 ms/key, loss 0 from 30 ms. Loss only, never extra or replaced characters.
+
+## Rule check T5
+| Rule | Result | Evidence |
+|---|---|---|
+| AC-2 | pass (code-term excluded, D26) | above |
+| AC-3 / AC-4 / AC-7 / AC-9 | pass | above |
+| SEC-1 | pass | leak scan 0 hits |
+| SEC-6 | pass | 0700/0600 |
+| SEC-8 | pass | 0600, pid, symlink refused |

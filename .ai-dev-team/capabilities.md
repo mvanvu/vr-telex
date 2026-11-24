@@ -20,3 +20,9 @@
 - fcitx wire helpers: CapabilityFlag → `Caps` (`caps_from_fcitx`, password|sensitive|disable → passthrough), `key_event`, `byte_cursor` (char → UTF-8 byte cursor) — crates/fe-fcitx/src/wire.rs (T6)
 - Test helper: private dbus-daemon per test (path socket in CARGO_TARGET_TMPDIR, stock session policy, no service dirs, killed on drop) + fcitx5-gtk–like zbus client `App` (pipelined key typing, applies CommitString/UpdateFormattedPreedit) — crates/fe-fcitx/tests/bus.rs (T6)
 - Headless smoke for the fcitx route: gnome-terminal with GTK_IM_MODULE=fcitx through a real vr-talex binary, reusing T1 lib.sh/rd.py with its own dirs — .ai-dev-team/workspace/qa-artifacts/T6/smoke.sh (T6)
+- IBus frontend `fe_ibus::{run, serve, Config, Environment, Limits, address_file_names}`: one-service pseudo bus on a private path socket (peer uid check before the handshake, EXTERNAL only, per-connection input contexts, panel `InputMode` property, address files) — crates/fe-ibus/src/lib.rs, server.rs, session.rs (T5)
+- Capped D-Bus socket halves for a zbus p2p server (message size checked on the fixed header, handshake byte budget, no fd passing) `socket::capped` — crates/fe-ibus/src/socket.rs (T5; crate-private)
+- Safe publish helpers: private socket dir, symlink-safe atomic address file, `Published` drop guard — crates/fe-ibus/src/address.rs (T5)
+- IBus value builders (IBusText, IBusAttrList, IBusEngineDesc, IBusProperty, IBusPropList) on `zbus::Structure::builder` — crates/fe-ibus/src/ibus.rs (T5)
+- Test bus + libibus-like client (`Bus`, `Sandbox`, `Client` with wire-ordered answers, `Seen`, key/tap/toggle helpers) — crates/fe-ibus/tests/common/mod.rs (T5)
+- `workspace/qa-artifacts/T5/qt5/session.sh <daemon> <run dir>` — isolated headless GNOME session (tests/e2e/lib.sh guard) with a FIFO command channel (`echo cmd > RUN/cmd; cat RUN/reply`) for driving any app by hand; Qt 5 IBus needs an `ibus-daemon` executable on PATH (T5 fix 1).
