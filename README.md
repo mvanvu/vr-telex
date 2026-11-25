@@ -1,67 +1,56 @@
 # vr-talex
 
-A Vietnamese Telex input method daemon for Ubuntu 24.04+ GNOME (Wayland and X11).
-One Rust binary serves the IBus protocol that gnome-shell uses and the fcitx5 D-Bus
-protocol, so neither ibus-daemon nor fcitx5 needs to run. It runs as a systemd user
-service for the current user only.
+A standalone Vietnamese Telex input method for Ubuntu 24.04+ GNOME (Wayland). It is one
+Rust binary that speaks the IBus and fcitx5 D-Bus protocols itself, so GNOME and apps
+talk to it directly; it uses no ibus, fcitx or bamboo libraries. It runs as a systemd
+user service for the current user only.
 
-## Supported environment
+## Requirements
 
-- Ubuntu 24.04 or newer with GNOME (tested on GNOME 46).
-- The stable Rust toolchain (1.100 or newer) to build from this checkout.
-- Install refuses, and changes nothing, while ibus-daemon is running. An existing
-  fcitx5 is stopped during install and started again by uninstall. Known limit: an
-  ibus-daemon started outside GNOME's IBus unit (e.g. by im-config) while fcitx5 also
-  runs is not detected; stop it before installing.
+- Ubuntu 24.04 or newer with GNOME (tested on GNOME 46, Wayland).
+- To build: the stable Rust toolchain (rustup, 1.100 or newer).
+- `ibus-daemon` must not be running. Install refuses, and changes nothing, while it is.
+  Stop it first, for example `ibus exit`, or end the process that started it (an
+  `im-config` autostart, for instance), then run `./install.sh` again.
+- fcitx5 needs no action: install stops it and takes over; uninstall starts it again.
 
 ## Install
 
-From the root of this checkout, as your own user (no `sudo`):
-
 ```sh
+git clone https://github.com/mvanvu/vr-talex.git
+cd vr-talex
 ./install.sh
 ```
 
-The script builds the release binary, installs it to `~/.local/bin/vr-talex`, starts the
-`vr-talex.service` user unit, adds "Vietnamese (Telex)" to the GNOME input sources and
-selects it. It saves the previous setup first (input sources, fcitx5 state, the files it
-replaces) under `~/.local/share/vr-talex/backup/`. Running it again changes no file; it restarts the daemon so GNOME selects Vietnamese (Telex) again.
-If the daemon does not come up healthy, install rolls everything back and exits non-zero.
+Run it as your own user: no `sudo`, no logout. It:
 
-It applies without logging out:
+1. builds the release binary (`cargo build --release --locked`);
+2. installs it to `~/.local/bin/vr-talex` and starts the `vr-talex.service` systemd user
+   unit;
+3. makes the input sources English (US) and "Vietnamese (Telex)" and selects
+   Vietnamese (Telex);
+4. saves the previous setup (input sources, fcitx5 state, the files it replaces) under
+   `~/.local/share/vr-talex/backup/`.
 
-- Apps on the IBus route (gnome-shell, GTK 4 apps, Chrome, the VS Code editor) reconnect
-  on their own.
-- Apps on the fcitx route (for example gnome-terminal, a GTK 3 app started with
-  `GTK_IM_MODULE=fcitx`) reconnect on their own.
-- Qt apps started before install keep receiving raw keys until they are restarted or you
-  log in again. Nothing is lost; the keys are just not composed.
-
-## Uninstall
-
-```sh
-./uninstall.sh
-```
-
-Stops and removes everything install wrote, restores the saved input sources and files,
-and starts fcitx5 again if it ran before. A file you edited after install is not deleted:
-it is moved aside as `<name>.vr-talex-saved-<date>` and the script names it.
+If the daemon does not come up healthy, install rolls everything back and exits
+non-zero. Running it again changes no file; it only restarts the daemon (about 1 s).
 
 ## Usage
 
-- Tap Ctrl+Shift alone (press both, release with no other key in between) to switch
-  between Vietnamese (`VI`) and English (`EN`) in all windows. The top-bar indicator
-  shows the mode, and the last mode is kept across logins. Ctrl+Shift+T, Ctrl+Shift+C
-  and other shortcuts reach the app and do not switch the mode.
-- The word being typed is shown underlined and committed at the next space, punctuation
-  or focus change.
-- Fields the app marks as password fields receive keys unchanged.
+| Keys | Effect |
+|---|---|
+| Ctrl+Space | Switch input source between English (US) and Vietnamese (Telex). This is GNOME's "switch input source" shortcut; on stock GNOME it is Super+Space, so set it to Ctrl+Space in Settings > Keyboard if you want that. |
+| Ctrl+Shift, tapped alone | With Vietnamese (Telex) selected: toggle Vietnamese and English. The top-bar indicator shows `vi` or `en`. Ctrl+Shift+T, Ctrl+Shift+C and other shortcuts are not affected. |
+
+With English (US) selected the IME is off and keys pass through unchanged. The word being
+typed is shown underlined and committed at the next space, punctuation or focus change.
+Password fields receive keys unchanged.
 
 Telex rules:
 
 | Keys | Result |
 |---|---|
-| `s` `f` `r` `x` `j` | sắc, huyền, hỏi, ngã, nặng (anywhere after the vowel: `vieetj` → việt) |
+| `s` `f` `r` `x` `j` | sắc, huyền, hỏi, ngã, nặng; the tone key can come anywhere after the vowel (`vieetj` → việt) |
 | `z` | removes the tone |
 | `aa` `ee` `oo` | â ê ô |
 | `aw` `ow` `uw` | ă ơ ư |
@@ -70,22 +59,35 @@ Telex rules:
 | `dd` | đ |
 | the same key again | undoes the change and types the key (`ass` → as, `ddd` → dd) |
 
-Upper case is kept per letter (`Vieetj` → Việt). A word that cannot be Vietnamese
-(`class`, `https`, `git`) is left exactly as typed.
+The tone goes on the modern position (`hoà`, `thuý`). Upper case is kept per letter
+(`Vieetj` → Việt). A word that cannot be Vietnamese (`class`, `https`, `git`) stays exactly
+as typed.
 
-Known limits:
+## Known limits
 
-- `aa`, `ee`, `oo` change the vowel only when the two keys are next to each other.
-- `uow` always gives `ươ`, so `thuở` and `huơ` cannot be typed.
-- After undo by repeating a key, the rest of the word stays raw, so `xoong` cannot be
-  typed.
-- VS Code integrated terminal: letters can be lost at high key rates. Under
-  investigation.
+| Limit | Detail |
+|---|---|
+| `aa` `ee` `oo` must be adjacent | The two keys must be next to each other to change the vowel. |
+| Some words cannot be typed | `uow` always gives `ươ`, so `thuở` and `huơ` are not possible. After undo by repeating a key the rest of the word stays raw, so `xoong` is not possible. |
+| VS Code integrated terminal | Letters can be lost when keys arrive faster than about 30 ms apart. This is an xterm.js limitation; human typing is far slower. |
+| Chrome address bar | Tab moves focus to the suggestion's remove button (Chrome's own behaviour, in English too). Use Enter, or → / End then Enter. |
+| Qt apps | They need the fcitx5 Qt frontend package (`fcitx5-frontend-qt5` and/or `fcitx5-frontend-qt6`). Without it Qt apps have no Vietnamese input. Qt apps started before install keep receiving raw keys until restarted; nothing is lost. |
 
-## If typing breaks
+## Uninstall
+
+```sh
+./uninstall.sh
+```
+
+Stops and removes everything install wrote, restores the saved input sources and files,
+and starts fcitx5 again if it was in use and is still installed. A file you changed after
+install is kept as `<file>.vr-talex-saved-<date>` (with a warning) before the original
+is restored.
+
+## Troubleshooting
 
 Keys pass through unchanged while the daemon is down, so plain English typing keeps
-working. To check or restart the daemon:
+working.
 
 ```sh
 systemctl --user status vr-talex.service
@@ -93,11 +95,10 @@ systemctl --user restart vr-talex.service
 journalctl --user -u vr-talex.service
 ```
 
-The unit restarts the daemon by itself after a crash and never gives up. The delay grows
-with each crash in the session, from 1 s up to 15 s; `systemctl --user restart
-vr-talex.service` resets it.
+The unit restarts the daemon after a crash and never gives up. The delay grows with each
+crash in the session, from 1 s up to 15 s; `restart` resets it.
 
-To remove it completely without typing in Vietnamese mode:
+If typing breaks and you want it gone:
 
 ```sh
 systemctl --user disable --now vr-talex.service
@@ -124,12 +125,13 @@ dumps, and serves only processes of your own user. These risks remain and are ac
 - A crash or restart of the daemon loses the word in progress. Keys typed while it is
   down pass through raw.
 
-## Build and test
+## Development
 
 ```sh
 cargo build --release --locked
 cargo test --workspace --locked
 bash tests/install/run.sh   # install/uninstall in a throwaway sandbox HOME and bus
+tests/e2e/run.sh            # end-to-end run; see tests/e2e/README.md
 ```
 
 License: MIT.
