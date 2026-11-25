@@ -561,6 +561,43 @@ fn in_an_address_field_the_preedit_is_cleared_before_the_word_is_committed() {
 }
 
 #[test]
+fn in_an_address_field_tab_ends_the_word_and_the_enter_after_it_is_the_clients_alone() {
+    block_on(async {
+        let bus = Bus::start().await;
+        let mut shell = bus.greeted().await;
+        let path = shell.shell_context().await;
+        shell
+            .set(&path, "ContentType", (PURPOSE_URL, 0u32))
+            .await
+            .ok();
+        shell.unasked(QUIET).await;
+
+        // Tab accepts the address bar's completion: the word goes out as for
+        // Enter, and the key goes on to the client.
+        assert_eq!(shell.type_letters(&path, "git").await, [preedit("git")]);
+        let tab = shell.key(&path, KEY_TAB, 0).await;
+        assert_eq!(tab.before, [hidden(Some(0)), Seen::Commit("git".into())]);
+        assert!(!tab.handled());
+        let release = shell.key(&path, KEY_TAB, RELEASE).await;
+        assert_eq!(release.before, []);
+        assert!(!release.handled());
+
+        // What the client made of the Tab (the completed address, a row of
+        // its list) is its own: the Enter that follows changes none of it.
+        let enter = shell.key(&path, KEY_RETURN, 0).await;
+        assert_eq!(enter.before, []);
+        assert!(!enter.handled());
+        let release = shell.key(&path, KEY_RETURN, RELEASE).await;
+        assert_eq!(release.before, []);
+        assert!(!release.handled());
+        assert_eq!(shell.unasked(QUIET).await, []);
+
+        // Nothing of the ended word comes back with the next one.
+        assert_eq!(shell.type_letters(&path, "a").await, [preedit("a")]);
+    });
+}
+
+#[test]
 fn gnome_shell_never_gets_a_delete_surrounding_text() {
     // Mutter 46 aborts (the whole session goes down) on a
     // DeleteSurroundingText that does not fit the surrounding text it holds,

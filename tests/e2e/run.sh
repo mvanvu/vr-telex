@@ -328,7 +328,12 @@ set_mode() {  # set_mode VI|EN (the tap reaches the engine only through a focuse
 # the tab ends on must be the one EN mode reaches. word:key=address[|address] — VI mode only
 # (Vietnamese words): the tab must end on one of those addresses ("search:<query>" for a search).
 # xn--ng-pma05d708i is "đường". E2E_SUGGEST_CASES / E2E_SUGGEST_VI_CASES replace the lists.
-SUGGEST_CASES="${E2E_SUGGEST_CASES-git:Return git:Tab you:Return you:Tab loc:Return loc:Tab tinh:Return tinh:Tab}"
+# word:key+key[+…] — the keys one after the other at the typing pace ("quick+" first: without waiting
+# for the suggestion, "SLEEP:s" for a pause). Chrome decides what Tab then Enter does (in Chrome 157
+# Tab moves to the row's "remove suggestion" button and Enter presses it: the page leaves the
+# suggestions and the bar falls back to the typed letters); VI mode must end where EN mode ends.
+SUGGEST_CASES="${E2E_SUGGEST_CASES-git:Return git:Tab you:Return you:Tab loc:Return loc:Tab tinh:Return tinh:Tab
+  git:Tab+Return you:Tab+Return loc:Tab+Return tinh:Tab+Return git:quick+Tab+Return git:Tab+Tab+Return}"
 SUGGEST_VI_CASES="${E2E_SUGGEST_VI_CASES-dduwowngf:Return=http://xn--ng-pma05d708i.test/
   dduw:Tab=http://xn--ng-pma05d708i.test/ tieengs:Return=search:tiếng vieetj:Return=search:việt}"
 SUGGEST_DELAY=0.08
@@ -427,11 +432,15 @@ for sc in $SCENARIOS; do
       [ -n "$SITE_PORT" ] || { result FR-8 FAIL "local site did not start"; continue; }
       start_chrome || { result FR-8 FAIL "chrome did not start"; continue; }
       # Two typed visits per page make each one an inline suggestion for its prefix.
-      tab=$($E2E cdp "$PORTFILE" new about:blank)
-      for u in $(for h in $SITE_HOSTS; do echo "http://$h/"; done) "http://localhost:$SITE_PORT/"; do
-        for k in 1 2; do $E2E cdp "$PORTFILE" navigate "$tab" "$u" >/dev/null; pause 0.7; done
-      done
-      $E2E cdp "$PORTFILE" close "$tab" >/dev/null; pause 1
+      seed_history() {
+        local tab u k
+        tab=$($E2E cdp "$PORTFILE" new about:blank)
+        for u in $(for h in $SITE_HOSTS; do echo "http://$h/"; done) "http://localhost:$SITE_PORT/"; do
+          for k in 1 2; do $E2E cdp "$PORTFILE" navigate "$tab" "$u" >/dev/null; pause 0.7; done
+        done
+        $E2E cdp "$PORTFILE" close "$tab" >/dev/null; pause 1
+      }
+      seed_history
       # What kind of field the address bar reports (IBus purpose/hints, as GNOME Shell forwards them).
       tab=$($E2E cdp "$PORTFILE" new about:blank); activate google-chrome; pause 0.7
       $E2E inject --keys down:Control_L l up:Control_L SLEEP:0.5 >/dev/null
@@ -443,33 +452,46 @@ for sc in $SCENARIOS; do
         set_mode "$mode" || { ok=0; detail="$detail; could not switch to $mode"; break; }
         cases=$SUGGEST_CASES; [ "$mode" = VI ] && cases="$cases $SUGGEST_VI_CASES"
         for c in $cases; do
-          c=${c%%=*} word=${c%:*} how=${c#*:}
+          c=${c%%=*} word=${c%%:*} how=${c#*:}
           tab=$($E2E cdp "$PORTFILE" new about:blank); activate google-chrome; pause 0.7
           # One injection for the whole case: ending an injection removes its keyboard from the
           # seat, which takes the focus from the address bar and commits the word before the key
           # under test. Screenshots are taken alongside, in the pauses.
           keys=(down:Control_L l up:Control_L SLEEP:0.4)
           for ((j = 0; j < ${#word}; j++)); do keys+=("${word:j:1}"); done
-          keys+=(SLEEP:1.5)
           # Tab takes the suggestion and moves the focus to the suggestion list; Shift+Tab brings it
-          # back unchanged and Return then goes to whatever Tab left in the address bar.
-          [ "$how" = Tab ] && keys+=(Tab SLEEP:1.5 down:Shift_L Tab up:Shift_L SLEEP:0.4)
-          keys+=(Return)
+          # back unchanged and Return then goes to whatever Tab left in the address bar. A "+" list
+          # is typed as written, key after key at the typing pace ("quick+" first: without waiting
+          # for the suggestion either), as a user who accepts with Tab and presses Enter at once.
+          case "$how" in
+            quick+*) IFS=+ read -r -a seq <<< "${how#quick+}"; keys+=("${seq[@]}");;
+            *+*) IFS=+ read -r -a seq <<< "$how"; keys+=(SLEEP:1.5 "${seq[@]}");;
+            Tab) keys+=(SLEEP:1.5 Tab SLEEP:1.5 down:Shift_L Tab up:Shift_L SLEEP:0.4 Return);;
+            *) keys+=(SLEEP:1.5 Return);;
+          esac
           t=$(python3 -c "print(1.0 + 0.4 + ${#word} * $SUGGEST_DELAY)")
           ( pause "$t"; screenshot "$OUTD/suggest-$mode-$word-$how-1typed.png"
-            [ "$how" = Tab ] && { pause 1.5; screenshot "$OUTD/suggest-$mode-$word-$how-2tab.png"; } ) &
+            case "$how" in Tab*) pause 1.5; screenshot "$OUTD/suggest-$mode-$word-$how-2tab.png";; esac ) &
           $E2E inject --delay "$SUGGEST_DELAY" --keys "${keys[@]}" >/dev/null
           wait $!
           pause 1.5
           seen[$mode:$c]=$($E2E cdp "$PORTFILE" url "$tab")
           $E2E cdp "$PORTFILE" close "$tab" >/dev/null
           echo "  suggest $mode $c -> ${seen[$mode:$c]}"
+          # Enter on a row's button (reached with Tab) can remove that page from the suggestions:
+          # the next case starts from the same history again.
+          case "$how" in *+*) seed_history;; esac
         done
       done
       for c in $SUGGEST_CASES; do
         en=${seen[EN:$c]:-} vi=${seen[VI:$c]:-}
         # Without an inline suggestion in EN mode the case proves nothing: the setup is broken.
-        case "$en" in search:*|""|about:*) ok=0; detail="$detail; $c: no suggestion in EN mode [$en]"; continue;; esac
+        # A key list is compared as it is: where it ends is Chrome's choice, and the single-key
+        # cases already show that the suggestions are there.
+        case "$c:$en" in
+          *+*:?*) ;;
+          *:search:*|*:|*:about:*) ok=0; detail="$detail; $c: no suggestion in EN mode [$en]"; continue;;
+        esac
         [ "$en" = "$vi" ] || { ok=0; bad=$((bad + 1)); detail="$detail; $c: VI went to [$vi], EN to [$en]"; }
       done
       # Vietnamese words, which EN mode cannot type: VI must reach the expected address.

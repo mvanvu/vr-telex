@@ -45,6 +45,14 @@ inside the same injection: `--keys` takes `EVAL:<shell JS>` for a window switch,
 and `down:`/`up:` for Ctrl+Space. `focus-kept` (daemon only) checks AC-3 that way: a Chrome window
 switch, and in gnome-terminal a window switch, a click on another window and Ctrl+Space to the US layout.
 
+Address-bar suggestions (`suggest`): pages of a local site are seeded into Chrome's history, then each
+case (`word:key`, or `word:key+key` for keys typed one after the other) runs in EN mode — the engine
+passes every key through, so that is what Chrome does by itself — and in VI mode, and both must end
+on the same address. What a key does there is Chrome's choice: in Chrome 157, Enter goes to the inline
+suggestion, while Tab moves to that row's "remove suggestion" button, so Tab then Enter removes the
+page from the suggestions and leaves the typed letters (`about:blank` in both modes). The history is
+seeded again after each key-list case.
+
 Key pacing: keys go out on a fixed 15 ms schedule (the D-Bus call cost is absorbed, not added). Every
 injection reports its measured mean ms/key; an AC-2 check fails when the mean is above the delay + 1 ms.
 
