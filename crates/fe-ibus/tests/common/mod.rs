@@ -36,6 +36,7 @@ pub const SHIFT: u32 = 1 << 0;
 pub const CONTROL: u32 = 1 << 2;
 pub const RELEASE: u32 = 1 << 30;
 pub const KEY_SPACE: u32 = 0x20;
+pub const KEY_TAB: u32 = 0xff09;
 pub const KEY_RETURN: u32 = 0xff0d;
 pub const KEY_SHIFT_L: u32 = 0xffe1;
 pub const KEY_CONTROL_L: u32 = 0xffe3;
