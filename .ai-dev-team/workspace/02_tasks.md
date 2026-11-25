@@ -21,6 +21,7 @@
 | FR-8 | Bug (live, user report): Chrome address bar with an inline suggestion — Enter loses typed letters instead of taking the suggestion; Tab does not accept the suggestion | be | - | security | AC-2, AC-3 | crates/ime-core/** and/or crates/fe-ibus/** (per root cause; worktree ../vr-talex-wt-FR8) | headless repro with seeded Chrome history | done | 0 |
 | FR-9 | install.sh: leave Vietnamese (Telex) selected in the RUNNING shell (R2 from FR-7; the shell keeps its in-memory MRU) | be | - | security | AC-5, D33, SEC-19 | install.sh, packaging/common.sh, tests/install/run.sh, tests/e2e/install_scenario.sh | install suite + e2e install scenario | done | 0 |
 | FR-10 | Bug: a word in progress in gnome-terminal (GTK3 im-wayland via gnome-shell) is lost on FocusOut — window switch, Ctrl+Space popup (pre-existing, found by FR-7) | be | FR-7 merged | security | AC-3, B3 | crates/fe-ibus/** (per root cause) | e2e focus scenario in gnome-terminal | done (harness artifact; test pinned) | 0 |
+| FR-11 | Bug (live, user): browser address bar — type, Tab to accept the suggestion, then Enter → letters lost | be | FR-8 | security | AC-2, D35 | crates/fe-ibus/** per root cause (worktree ../vr-talex-wt-FR11) | e2e suggest Tab+Return | done (not a vr-talex bug: Chrome Tab focuses the remove-suggestion button; user confirmed EN too) | 0 |
 | REV-T10 | Review of the T10 revert (D28) | be | - | - | D28 | (review only) | cargo test telex-core, ime-core | done | 0 |
 
 ## Notes
