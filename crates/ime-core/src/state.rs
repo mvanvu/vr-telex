@@ -8,13 +8,13 @@ use std::path::{Path, PathBuf};
 
 use crate::ime::{Mode, StateStore};
 
-const APP_DIR: &str = "vr-talex";
+const APP_DIR: &str = "vr-telex";
 const FILE: &str = "mode";
 const TEMP_FILE: &str = "mode.tmp";
 /// "VI" or "EN" plus an optional newline; anything longer is not our file.
 const MAX_LEN: u64 = 8;
 
-/// `$XDG_STATE_HOME/vr-talex`, or `$HOME/.local/state/vr-talex` when the
+/// `$XDG_STATE_HOME/vr-telex`, or `$HOME/.local/state/vr-telex` when the
 /// variable is unset, empty or relative (the XDG rule). `None` without a
 /// usable home directory.
 pub fn state_dir(xdg_state_home: Option<&OsStr>, home: Option<&OsStr>) -> Option<PathBuf> {

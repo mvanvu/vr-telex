@@ -74,17 +74,17 @@ sources() { gsettings get org.gnome.desktop.input-sources sources; }
 CUR_SRC_JS="(k => [(k._inputSourceManager?.currentSource?.type ?? '') + ':' + (k._inputSourceManager?.currentSource?.id ?? ''), $CUR_LABEL_JS].join('|'))(Main.panel.statusArea.keyboard)"
 cur_src() { sh_value "$CUR_SRC_JS"; }
 
-# Wait (up to 10 s) until the shell's current source is vr-talex with the indicator on vi; prints the
+# Wait (up to 10 s) until the shell's current source is vr-telex with the indicator on vi; prints the
 # last state seen. Labels are compared case-insensitively (D32 made them lower case).
 wait_vr_selected() {
   local i st=""
   for i in $(seq 40); do
     st=$(cur_src)
-    case "${st,,}" in "ibus:vr-talex|vi") break;; esac
+    case "${st,,}" in "ibus:vr-telex|vi") break;; esac
     pause 0.25
   done
   printf '%s' "$st"
-  case "${st,,}" in "ibus:vr-talex|vi") return 0;; esac
+  case "${st,,}" in "ibus:vr-telex|vi") return 0;; esac
   return 1
 }
 
@@ -108,11 +108,11 @@ install_scenario() {
   guard
   # The scenario never builds: a build inside the sandbox would need the user's ~/.cargo (and write to it).
   if [ ! -x "$BIN" ]; then
-    result AC-5/AC-6 INCOMPLETE "needs a built daemon (cargo build --release, or VR_TALEX_BIN); the scenario does not build"
+    result AC-5/AC-6 INCOMPLETE "needs a built daemon (cargo build --release, or VR_TELEX_BIN); the scenario does not build"
     return
   fi
   write_shims
-  # Start from the AC-5 precondition: no vr-talex, sources [('xkb','us')], fcitx5 running when installed here.
+  # Start from the AC-5 precondition: no vr-telex, sources [('xkb','us')], fcitx5 running when installed here.
   if [ -n "$IME_PID" ] && kill -0 "$IME_PID" 2>/dev/null; then kill -TERM "$IME_PID"; wait_gone "$IME_PID" 10; fi
   rm -f "$XDG_CONFIG_HOME"/ibus/bus/*
   gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us')]"
@@ -122,30 +122,30 @@ install_scenario() {
     gdbus wait --session --timeout 10 org.fcitx.Fcitx5 && had_fcitx=1
   fi
   local before; before=$(sources)
-  # VR_TALEX_BIN is T8's seam (install this binary, skip the build); CARGO_HOME/RUSTUP_HOME point into the
+  # VR_TELEX_BIN is T8's seam (install this binary, skip the build); CARGO_HOME/RUSTUP_HOME point into the
   # sandbox so nothing can reach the live toolchain dirs even if a build were attempted.
-  local tool_env=(PATH="$SHIM:$PATH" VR_TALEX_BIN="$BIN" CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup")
+  local tool_env=(PATH="$SHIM:$PATH" VR_TELEX_BIN="$BIN" CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup")
   local rc t_end ready st i ok5=1 d5=""
   (cd "$REPO" && env "${tool_env[@]}" ./install.sh) >"$LOGS/install-1.log" 2>&1; rc=$?
   t_end=$(date +%s.%N)
-  for i in $(seq 40); do st=$(sh_value "$IME_STATE"); case "$st" in vr-talex\|*) break;; esac; pause 0.25; done
+  for i in $(seq 40); do st=$(sh_value "$IME_STATE"); case "$st" in vr-telex\|*) break;; esac; pause 0.25; done
   ready=$(python3 -c 'import sys, time; print(f"{time.time() - float(sys.argv[1]):.1f}")' "$t_end")
   # AC-5: Vietnamese works within 5 s of the install finishing.
   d5="install rc=$rc; engine connected to the shell [$st] ${ready} s after install returned (limit 5 s)"
   [ "$rc" = 0 ] || ok5=0
-  case "$st" in vr-talex\|*) ;; *) ok5=0;; esac
+  case "$st" in vr-telex\|*) ;; *) ok5=0;; esac
   # D33: the running shell's current source is Vietnamese (Telex) and the indicator shows vi.
   local cur
   if cur=$(wait_vr_selected); then d5="$d5; shell current source after install [$cur]"
-  else d5="$d5; shell current source after install [$cur] expected [ibus:vr-talex|vi]"; ok5=0; fi
+  else d5="$d5; shell current source after install [$cur] expected [ibus:vr-telex|vi]"; ok5=0; fi
   # BASE-48 asks for the 'current' key too; GNOME 46 marks it "deprecated and ignored" and the shell
   # never writes it, so it is recorded for the reader, not judged.
   d5="$d5; gsettings current=$(gsettings get org.gnome.desktop.input-sources current 2>&1) (deprecated, not written by the shell)"
   grep -qi selected "$LOGS/install-1.log" && { d5="$d5; install printed 'selected' (BASE-48)"; ok5=0; }
   python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) <= 5.0 else 1)' "$ready" || ok5=0
   local after; after=$(sources)
-  local n; n=$(echo "$after" | grep -o "'vr-talex'" | wc -l)
-  d5="$d5; sources $before -> $after ($n x vr-talex)"; [ "$n" = 1 ] || ok5=0
+  local n; n=$(echo "$after" | grep -o "'vr-telex'" | wc -l)
+  d5="$d5; sources $before -> $after ($n x vr-telex)"; [ "$n" = 1 ] || ok5=0
   ensure_vi
   type_in_new_terminal vieetj "$OUTD/install-term.txt"
   local got; got=$(cat "$OUTD/install-term.txt" 2>/dev/null)
@@ -160,12 +160,12 @@ install_scenario() {
   fi
   d5="$d5; new Chrome typed [$gotc] expected [việt ]"; [ "$gotc" = "việt " ] || ok5=0
   # D33, source already present: replay the live state FR-7 found — the shell on English (US) while
-  # mru-sources in the settings still starts with vr-talex (the shell keeps its MRU list in memory).
+  # mru-sources in the settings still starts with vr-telex (the shell keeps its MRU list in memory).
   # The switch is made inside the throwaway shell only; install.sh itself never uses Eval.
   sh_eval "Object.values(Main.panel.statusArea.keyboard._inputSourceManager.inputSources).find(s => s.type === 'xkb').activate(true); 1" >/dev/null
   pause 0.5
   local mru_set; mru_set=$(gsettings get org.gnome.desktop.input-sources mru-sources)
-  gsettings set org.gnome.desktop.input-sources mru-sources "[('ibus', 'vr-talex'), $(echo "$mru_set" | sed -E "s/^\[//; s/\]$//; s/\('ibus', 'vr-talex'\)(, )?//; s/, $//")]"
+  gsettings set org.gnome.desktop.input-sources mru-sources "[('ibus', 'vr-telex'), $(echo "$mru_set" | sed -E "s/^\[//; s/\]$//; s/\('ibus', 'vr-telex'\)(, )?//; s/, $//")]"
   local pre2; pre2=$(cur_src)
   local fp1 fp2
   fp1=$(footprint)
@@ -173,7 +173,7 @@ install_scenario() {
   fp2=$(footprint)
   d5="$d5; second install changed files: $([ "$fp1" = "$fp2" ] && echo no || echo YES)"; [ "$fp1" = "$fp2" ] || ok5=0
   if cur=$(wait_vr_selected); then d5="$d5; second install with the shell on [$pre2] -> current [$cur]"
-  else d5="$d5; second install with the shell on [$pre2] -> current [$cur] expected [ibus:vr-talex|vi]"; ok5=0; fi
+  else d5="$d5; second install with the shell on [$pre2] -> current [$cur] expected [ibus:vr-telex|vi]"; ok5=0; fi
   d5="$d5; gsettings current=$(gsettings get org.gnome.desktop.input-sources current 2>&1)"
   [ "$ok5" = 1 ] && result AC-5 PASS "$d5" || result AC-5 FAIL "$d5"
 

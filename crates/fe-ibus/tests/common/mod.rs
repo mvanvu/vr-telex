@@ -54,7 +54,7 @@ pub fn block_on<F: Future>(test: F) -> F::Output {
 fn unique_dir() -> PathBuf {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     std::env::temp_dir().join(format!(
-        "vr-talex-ibus-test-{}-{}",
+        "vr-telex-ibus-test-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ))
@@ -91,7 +91,7 @@ impl Sandbox {
     }
 
     pub fn socket(&self) -> PathBuf {
-        self.dir.join("run").join("vr-talex").join("ibus")
+        self.dir.join("run").join("vr-telex").join("ibus")
     }
 
     pub fn address_file(&self, display: &str) -> PathBuf {

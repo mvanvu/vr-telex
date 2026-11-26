@@ -1,9 +1,9 @@
 #!/bin/bash
-# vr-talex end-to-end stress harness (AC-2..AC-7, AC-10, SEC-1, SEC-29). See tests/e2e/README.md.
+# vr-telex end-to-end stress harness (AC-2..AC-7, AC-10, SEC-1, SEC-29). See tests/e2e/README.md.
 #
 # usage: tests/e2e/run.sh [--smoke] [options]
 #   --smoke              stub IME, apps "term chrome", 1 run, 60 words, scenarios "password toggle focus"
-#   --ime stub|daemon|none   engine under test (default daemon = $VR_TALEX_BIN or target/release/vr-talex)
+#   --ime stub|daemon|none   engine under test (default daemon = $VR_TELEX_BIN or target/release/vr-telex)
 #   --apps "LIST"        from: term chrome omnibox code code-term (default: all five)
 #   --runs N             runs per app (default 3)
 #   --words N            corpus size (default 5000)
@@ -47,7 +47,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 GOLDEN="$REPO/crates/telex-core/tests/golden/telex_golden.tsv"
-BIN="${VR_TALEX_BIN:-$REPO/target/release/vr-talex}"
+BIN="${VR_TELEX_BIN:-$REPO/target/release/vr-telex}"
 E2E="python3 $HERE/e2e.py"
 
 # ------------------------------------------------------------------ outer: build the sandbox, re-exec isolated
@@ -92,7 +92,7 @@ guard
 # GSettings go through a dconf activated on this private bus, as on the desktop: the keyfile backend
 # rewrites the whole file from each process' cache, so any app's write can undo an install or uninstall
 # that happened a moment before.
-if [ "$IME" = none ]; then SRC="[('xkb', 'us')]"; else SRC="[('ibus', 'vr-talex')]"; fi
+if [ "$IME" = none ]; then SRC="[('xkb', 'us')]"; else SRC="[('ibus', 'vr-telex')]"; fi
 gsettings set org.gnome.desktop.input-sources sources "$SRC" || { echo "could not seed the input sources"; exit 1; }
 
 if [ "$ROUTE" = fcitx ]; then export GTK_IM_MODULE=fcitx QT_IM_MODULE=fcitx XMODIFIERS=@im=fcitx SDL_IM_MODULE=fcitx
@@ -105,7 +105,7 @@ start_ime() {
   guard
   case "$IME" in
     stub)
-      python3 "$HERE/stub_ime.py" "$GOLDEN" "$XDG_RUNTIME_DIR/vr-talex-stub/bus" "$LOGS/ime.log" "$OUTD/latency.json" &
+      python3 "$HERE/stub_ime.py" "$GOLDEN" "$XDG_RUNTIME_DIR/vr-telex-stub/bus" "$LOGS/ime.log" "$OUTD/latency.json" &
       IME_PID=$!;;
     daemon)
       RUST_LOG=trace "$BIN" >"$LOGS/daemon.stdout" 2>"$LOGS/daemon.stderr" &
@@ -115,7 +115,7 @@ start_ime() {
   local i st
   for i in $(seq 40); do
     st=$(sh_value "$IME_STATE")
-    case "$st" in vr-talex\|VI|vr-talex\|EN) echo "ime ($IME) connected after ~$((i / 4)) s: $st"; return 0;; esac
+    case "$st" in vr-telex\|VI|vr-telex\|EN) echo "ime ($IME) connected after ~$((i / 4)) s: $st"; return 0;; esac
     pause 0.25
   done
   echo "ime ($IME) not connected within 10 s: state [$st]"; return 1
@@ -199,7 +199,7 @@ start_chrome() {
     rules="${rules}MAP localhost 127.0.0.1, "
   fi
   cat > "$OUTD/page.html" <<'EOF'
-<!doctype html><meta charset=utf-8><title>vr-talex e2e</title>
+<!doctype html><meta charset=utf-8><title>vr-telex e2e</title>
 <style>textarea{width:95%;height:180px}#o{width:95%;height:160px;background:#eee}</style>
 <textarea id=t></textarea><br><input id=p type=password autocomplete=off><br><div id=o tabindex=0>click target</div>
 <script>
@@ -373,7 +373,7 @@ for sc in $SCENARIOS; do
       # Ctrl+Shift inert); Ctrl+Space back turns it on in the kept mode.
       [ "$IME" = daemon ] || { result AC-4:indicator SKIP "needs the daemon (source switch, D33)"; continue; }
       gsettings set org.gnome.desktop.wm.keybindings switch-input-source "['<Control>space']"
-      gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('xkb', 'vn'), ('ibus', 'vr-talex')]"
+      gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('xkb', 'vn'), ('ibus', 'vr-telex')]"
       pause 1
       sh_eval "Main.panel.statusArea.keyboard._inputSourceManager.inputSources[2].activate(true); 1" >/dev/null
       pause 1
@@ -400,11 +400,11 @@ for sc in $SCENARIOS; do
       $E2E inject --keys Return down:Control_L d up:Control_L >/dev/null
       wait_gone "$pid" 10 || echo "terminal did not exit after Ctrl+D"
       got=$(cat "$act" 2>/dev/null); exp="$(golden_of vieetj) vieetj $(golden_of vieetj) j aa đ "
-      detail="route=$ROUTE; $(echo "$out" | head -1); indicator after typed toggles [$ind1, $ind2] expected [vr-talex|EN, vr-talex|VI]"
-      detail="$detail; after Ctrl+Space and a Ctrl+Shift there [$st4] ($off), Ctrl+Space back [$st5] expected [us|EN] (source-symbol=vi), [vr-talex|VI]"
+      detail="route=$ROUTE; $(echo "$out" | head -1); indicator after typed toggles [$ind1, $ind2] expected [vr-telex|EN, vr-telex|VI]"
+      detail="$detail; after Ctrl+Space and a Ctrl+Shift there [$st4] ($off), Ctrl+Space back [$st5] expected [us|EN] (source-symbol=vi), [vr-telex|VI]"
       detail="$detail; terminal got [$got] expected [$exp]"
-      if echo "$out" | grep -q '^toggle PASS' && [ "$ind1,$ind2" = vr-talex\|EN,vr-talex\|VI ] && [ "$got" = "$exp" ] \
-         && [ "$st4,$st5" = "us|EN,vr-talex|VI" ] && case "$off" in *engine=xkb:us::eng*source-symbol=vi) true;; *) false;; esac; then
+      if echo "$out" | grep -q '^toggle PASS' && [ "$ind1,$ind2" = vr-telex\|EN,vr-telex\|VI ] && [ "$got" = "$exp" ] \
+         && [ "$st4,$st5" = "us|EN,vr-telex|VI" ] && case "$off" in *engine=xkb:us::eng*source-symbol=vi) true;; *) false;; esac; then
         result AC-4:indicator PASS "$detail"
       else result AC-4:indicator FAIL "$detail"; fi;;
     focus)  # AC-3: a word in preedit is committed on window switch and on a click elsewhere
@@ -511,7 +511,7 @@ for sc in $SCENARIOS; do
       [ "$IME" = daemon ] || { result AC-3:kept SKIP "needs the daemon (Ctrl+Space source switch, D33)"; continue; }
       start_chrome || { result AC-3:kept FAIL "chrome did not start"; continue; }
       gsettings set org.gnome.desktop.wm.keybindings switch-input-source "['<Control>space']"
-      gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('ibus', 'vr-talex')]"
+      gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('ibus', 'vr-telex')]"
       pause 1
       sh_eval "Main.panel.statusArea.keyboard._inputSourceManager.inputSources[1].activate(true); 1" >/dev/null
       pause 1
@@ -544,9 +544,9 @@ for sc in $SCENARIOS; do
       got=$(cat "$act" 2>/dev/null); exp="$w1 $w2 ${w1}aa "
       gsettings set org.gnome.desktop.input-sources sources "$SRC"; pause 1
       d1="chrome window switch: [$gotc] expected [$w1]"
-      d2="terminal (switch, click on another window, Ctrl+Space): [$got] expected [$exp]; chrome field meanwhile [$other] expected []; source after Ctrl+Space back [$st] expected [vr-talex|VI]"
+      d2="terminal (switch, click on another window, Ctrl+Space): [$got] expected [$exp]; chrome field meanwhile [$other] expected []; source after Ctrl+Space back [$st] expected [vr-telex|VI]"
       [ "$gotc" = "$w1" ] && result AC-3:chrome-kept PASS "$d1" || result AC-3:chrome-kept FAIL "$d1"
-      if [ "$got" = "$exp" ] && [ -z "$other" ] && [ "$st" = "vr-talex|VI" ]; then result AC-3:term PASS "$d2"
+      if [ "$got" = "$exp" ] && [ -z "$other" ] && [ "$st" = "vr-telex|VI" ]; then result AC-3:term PASS "$d2"
       else result AC-3:term FAIL "$d2"; fi;;
     install)  # AC-5 / AC-6: install-then-type and uninstall inside the sandbox
       if [ "$SKIP_INSTALL" = 1 ]; then result AC-5/AC-6 SKIP "--skip-install"; continue; fi

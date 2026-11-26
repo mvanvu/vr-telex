@@ -7,7 +7,7 @@ use ime_core::{Ready, SharedIme};
 
 /// Serves the frontend until it stops or fails.
 ///
-/// The contract with the daemon (`vr-talex` main), the same for every frontend:
+/// The contract with the daemon (`vr-telex` main), the same for every frontend:
 /// - Call `ready.notify()` once clients can reach the frontend (socket
 ///   listening, bus names owned, address file written). The daemon sends
 ///   `READY=1` to systemd only after every frontend is ready.

@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use rustix::fs::OFlags;
 
-const APP_DIR: &str = "vr-talex";
+const APP_DIR: &str = "vr-telex";
 const SOCKET_FILE: &str = "ibus";
 /// Held by the running instance for its whole run (SEC-7).
 const LOCK_FILE: &str = "ibus.lock";
@@ -127,7 +127,7 @@ fn take_lock(dir: &Path, uid: u32) -> Result<File, PrepareError> {
     }
 }
 
-/// Creates `<runtime_dir>/vr-talex` (0700), takes the instance lock and
+/// Creates `<runtime_dir>/vr-telex` (0700), takes the instance lock and
 /// returns the socket path in it, after removing the socket a previous run
 /// left there (SEC-6, SEC-7). While another instance runs nothing is
 /// touched: its socket and address files are live.
@@ -199,7 +199,7 @@ pub(crate) fn write_address_file(
         Err(err) => return Err(err),
     }
 
-    let temp = bus_dir.join(format!(".{name}.vr-talex.tmp"));
+    let temp = bus_dir.join(format!(".{name}.vr-telex.tmp"));
     match fs::remove_file(&temp) {
         Err(err) if err.kind() != io::ErrorKind::NotFound => return Err(err),
         _ => {}
@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn the_lock_is_never_opened_through_a_link() {
-        let dir = std::env::temp_dir().join(format!("vr-talex-lock-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("vr-telex-lock-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir(&dir).unwrap();
         let target = dir.join("victim");
@@ -325,8 +325,8 @@ mod tests {
     #[test]
     fn address_is_a_path_address_with_the_guid() {
         assert_eq!(
-            bus_address(Path::new("/run/user/1000/vr-talex/ibus"), "abc").as_deref(),
-            Some("unix:path=/run/user/1000/vr-talex/ibus,guid=abc")
+            bus_address(Path::new("/run/user/1000/vr-telex/ibus"), "abc").as_deref(),
+            Some("unix:path=/run/user/1000/vr-telex/ibus,guid=abc")
         );
         assert_eq!(bus_address(Path::new("/run/a,b/ibus"), "abc"), None);
         assert_eq!(bus_address(Path::new("/run/a b/ibus"), "abc"), None);

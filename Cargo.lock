@@ -417,7 +417,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vr-talex"
+name = "vr-telex"
 version = "0.1.0"
 dependencies = [
  "fe-fcitx",

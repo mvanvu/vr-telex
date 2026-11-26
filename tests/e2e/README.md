@@ -1,6 +1,6 @@
 # tests/e2e — headless GNOME stress harness
 
-End-to-end checks of vr-talex in real apps: AC-2 (stress typing), AC-3 (commit on focus change),
+End-to-end checks of vr-telex in real apps: AC-2 (stress typing), AC-3 (commit on focus change),
 AC-4 (Ctrl+Shift toggle), AC-5/AC-6 (install / uninstall), AC-7 (password field), AC-10 (latency) and
 SEC-1 (no typed text in any output). Keys go through Mutter's RemoteDesktop D-Bus API (D12), so they
 take the real compositor path: Mutter → gnome-shell → IBus → the engine → the app.
@@ -20,7 +20,7 @@ kill-by-name tools replaced by stand-ins that refuse and log.
 ## Requirements
 Already present on Ubuntu 24.04 GNOME: `gnome-shell` 46, `gdbus`, `dbus-run-session`, `python3` (stdlib
 only), `gnome-terminal`, `google-chrome`, `code` (VS Code), `journalctl`. Nothing is installed by the
-harness. For `--ime daemon`: a built daemon (`cargo build --release`, or `VR_TALEX_BIN=/path`).
+harness. For `--ime daemon`: a built daemon (`cargo build --release`, or `VR_TELEX_BIN=/path`).
 
 ## Run
 ```
@@ -88,7 +88,7 @@ SEC-1 leak scan. Only the generator is stored; each run writes `out/corpus.json`
 `tokens.txt`.
 
 ## Engines
-- `--ime daemon` — the real `target/release/vr-talex`, started with `RUST_LOG=trace` and its stderr captured.
+- `--ime daemon` — the real `target/release/vr-telex`, started with `RUST_LOG=trace` and its stderr captured.
 - `--ime stub` — `stub_ime.py`, a stdlib IBus pseudo bus on a private socket that does word-level
   Telex by golden-list lookup, Ctrl+Shift toggle with the panel indicator, password passthrough and
   commit on FocusOut/Reset. It lets the harness be proven before the frontends exist; it is not the product.
@@ -106,10 +106,10 @@ unit tests)`, accepted only with `--allow-incomplete`. With the stub, `AC-10:stu
 handling time from `out/latency.json` (proves the reporting path, not the product).
 
 ## Install scenario (AC-5 / AC-6)
-Needs a built daemon (`$VR_TALEX_BIN` or `target/release/vr-talex`), passed to `install.sh` through T8's
-`VR_TALEX_BIN` seam; the scenario never builds, and `CARGO_HOME`/`RUSTUP_HOME` point into the sandbox.
+Needs a built daemon (`$VR_TELEX_BIN` or `target/release/vr-telex`), passed to `install.sh` through T8's
+`VR_TELEX_BIN` seam; the scenario never builds, and `CARGO_HOME`/`RUSTUP_HOME` point into the sandbox.
 It asserts: install exits 0, the engine reaches the shell within 5 s of install returning, the sources
-list holds vr-talex once, Vietnamese types in a new gnome-terminal and a newly started Chrome, a second
+list holds vr-telex once, Vietnamese types in a new gnome-terminal and a newly started Chrome, a second
 install changes no file; then uninstall restores the sources and (when present) fcitx5.
 
 ## Files

@@ -60,7 +60,7 @@ impl Default for Limits {
 /// Where the frontend lives on this machine and whom it serves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
-    /// `$XDG_RUNTIME_DIR`; the socket goes to `vr-talex/ibus` below it.
+    /// `$XDG_RUNTIME_DIR`; the socket goes to `vr-telex/ibus` below it.
     pub runtime_dir: PathBuf,
     /// `$XDG_CONFIG_HOME/ibus/bus`, where clients look for address files.
     pub bus_dir: PathBuf,
@@ -142,7 +142,7 @@ impl Config {
 
 /// Serves the frontend until it stops or fails.
 ///
-/// The contract with the daemon (`vr-talex` main), the same for every frontend:
+/// The contract with the daemon (`vr-telex` main), the same for every frontend:
 /// - `ready.notify()` is called once clients can reach the frontend: the
 ///   socket listens and the address files are written.
 /// - `Ok(())` is returned only when the frontend is not needed on this

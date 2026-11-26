@@ -1,4 +1,4 @@
 #!/bin/sh
 # A daemon build that dies at start: install must roll back (SEC-19).
-echo "broken-vr-talex: failing on purpose" >&2
+echo "broken-vr-telex: failing on purpose" >&2
 exit 1

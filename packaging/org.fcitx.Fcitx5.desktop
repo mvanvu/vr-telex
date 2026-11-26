@@ -2,6 +2,6 @@
 Type=Application
 Name=Fcitx 5
 Exec=fcitx5
-# Hidden by the vr-talex installer: fcitx5 must not start at login while
-# vr-talex serves its D-Bus names. uninstall.sh removes this file.
+# Hidden by the vr-telex installer: fcitx5 must not start at login while
+# vr-telex serves its D-Bus names. uninstall.sh removes this file.
 Hidden=true

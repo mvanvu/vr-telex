@@ -170,7 +170,7 @@ fn a_left_over_temporary_link_is_not_followed() {
         fs::create_dir_all(&bus_dir).unwrap();
         let target = sandbox.dir.join("victim");
         fs::write(&target, "untouched").unwrap();
-        let temp = bus_dir.join(format!(".{MACHINE_ID}-unix-wayland-0.vr-talex.tmp"));
+        let temp = bus_dir.join(format!(".{MACHINE_ID}-unix-wayland-0.vr-telex.tmp"));
         symlink(&target, &temp).unwrap();
 
         let (task, ready) = spawn(sandbox.config(), new_ime());

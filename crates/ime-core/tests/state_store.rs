@@ -23,7 +23,7 @@ impl Scratch {
     }
 
     fn state_dir(&self) -> PathBuf {
-        self.0.join("state").join("vr-talex")
+        self.0.join("state").join("vr-telex")
     }
 }
 
@@ -169,7 +169,7 @@ fn a_symlink_in_place_of_the_directory_is_refused() {
 
 #[test]
 fn an_unwritable_location_does_not_break_typing() {
-    let store = FileStateStore::new(PathBuf::from("/proc/vr-talex-no-such-dir/state"));
+    let store = FileStateStore::new(PathBuf::from("/proc/vr-telex-no-such-dir/state"));
     let mut ime = Ime::new(&store);
     let id = ctx(&mut ime, PREEDIT);
     tap_ctrl_shift(&mut ime, id);
@@ -181,20 +181,20 @@ fn the_state_directory_follows_the_xdg_rules() {
     let home = Some(OsStr::new("/home/u"));
     assert_eq!(
         state_dir(Some(OsStr::new("/x/state")), home),
-        Some(PathBuf::from("/x/state/vr-talex"))
+        Some(PathBuf::from("/x/state/vr-telex"))
     );
     assert_eq!(
         state_dir(None, home),
-        Some(PathBuf::from("/home/u/.local/state/vr-talex"))
+        Some(PathBuf::from("/home/u/.local/state/vr-telex"))
     );
     // XDG: a relative or empty value is invalid and ignored.
     assert_eq!(
         state_dir(Some(OsStr::new("relative/state")), home),
-        Some(PathBuf::from("/home/u/.local/state/vr-talex"))
+        Some(PathBuf::from("/home/u/.local/state/vr-telex"))
     );
     assert_eq!(
         state_dir(Some(OsStr::new("")), home),
-        Some(PathBuf::from("/home/u/.local/state/vr-talex"))
+        Some(PathBuf::from("/home/u/.local/state/vr-telex"))
     );
     assert_eq!(state_dir(None, None), None);
     assert_eq!(state_dir(None, Some(OsStr::new("not-absolute"))), None);

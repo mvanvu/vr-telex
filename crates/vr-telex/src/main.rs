@@ -1,4 +1,4 @@
-//! vr-talex daemon: wires every frontend to one shared IME.
+//! vr-telex daemon: wires every frontend to one shared IME.
 #![forbid(unsafe_code)]
 
 use std::ffi::OsStr;
@@ -64,7 +64,7 @@ enum Event {
 fn main() -> ExitCode {
     // Before any socket exists, so no key can be in memory yet (SEC-3).
     if harden().is_err() {
-        eprintln!("vr-talex: cannot switch off core dumps, not starting");
+        eprintln!("vr-telex: cannot switch off core dumps, not starting");
         return ExitCode::FAILURE;
     }
     install_panic_hook();
@@ -75,7 +75,7 @@ fn main() -> ExitCode {
     {
         Ok(rt) => rt,
         Err(_) => {
-            eprintln!("vr-talex: cannot start the async runtime");
+            eprintln!("vr-telex: cannot start the async runtime");
             return ExitCode::FAILURE;
         }
     };
@@ -115,12 +115,12 @@ fn install_panic_hook() {
 fn panic_line(location: Option<&Location<'_>>) -> String {
     match location {
         Some(at) => format!(
-            "vr-talex: internal error at {}:{}:{}",
+            "vr-telex: internal error at {}:{}:{}",
             at.file(),
             at.line(),
             at.column()
         ),
-        None => "vr-talex: internal error".to_owned(),
+        None => "vr-telex: internal error".to_owned(),
     }
 }
 
@@ -129,7 +129,7 @@ fn state_store() -> Store {
     match FileStateStore::from_env() {
         Some(store) => Arc::new(store),
         None => {
-            eprintln!("vr-talex: no home directory, the VI/EN mode is not saved");
+            eprintln!("vr-telex: no home directory, the VI/EN mode is not saved");
             Arc::new(MemoryStateStore::new(Mode::Vi))
         }
     }
@@ -206,7 +206,7 @@ async fn serve(
             None | Some(Ok(Event::Shutdown(Ok(())))) => break,
             Some(Ok(Event::Shutdown(Err(_)))) => {
                 // The default action of SIGTERM still ends the process.
-                eprintln!("vr-talex: cannot watch for SIGTERM");
+                eprintln!("vr-telex: cannot watch for SIGTERM");
             }
             Some(Ok(Event::Ready(name, true))) => unready.retain(|waiting| *waiting != name),
             // The handle was dropped unused: the `run` result says why.
@@ -221,12 +221,12 @@ async fn serve(
             // whole (SEC-17, D22).
             Some(Ok(Event::Finished(name, Err(err)))) => {
                 // Frontend errors carry no typed text by contract (SEC-1).
-                eprintln!("vr-talex: frontend {name} failed: {err}");
+                eprintln!("vr-telex: frontend {name} failed: {err}");
                 status = ExitCode::FAILURE;
                 break;
             }
             Some(Err(_)) => {
-                eprintln!("vr-talex: a frontend task panicked");
+                eprintln!("vr-telex: a frontend task panicked");
                 status = ExitCode::FAILURE;
                 break;
             }
@@ -363,7 +363,7 @@ mod tests {
     fn unique(kind: &str) -> PathBuf {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         std::env::temp_dir().join(format!(
-            "vr-talex-test-{}-{}.{kind}",
+            "vr-telex-test-{}-{}.{kind}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ))
@@ -482,13 +482,13 @@ mod tests {
         assert_eq!(
             line,
             format!(
-                "vr-talex: internal error at {}:{}:{}",
+                "vr-telex: internal error at {}:{}:{}",
                 file!(),
                 here.line(),
                 here.column()
             )
         );
-        assert_eq!(panic_line(None), "vr-talex: internal error");
+        assert_eq!(panic_line(None), "vr-telex: internal error");
     }
 
     #[test]
@@ -520,12 +520,12 @@ mod tests {
     #[test]
     fn notify_socket_must_be_absolute_or_abstract() {
         assert!(Notifier::parse(OsStr::new("/run/user/1000/systemd/notify")).is_some());
-        assert!(Notifier::parse(OsStr::new("@vr-talex-test")).is_some());
+        assert!(Notifier::parse(OsStr::new("@vr-telex-test")).is_some());
         assert!(Notifier::parse(OsStr::new("relative/notify")).is_none());
         assert!(Notifier::parse(OsStr::new("@")).is_none());
         assert!(Notifier::parse(OsStr::new("")).is_none());
         // No listener: sending fails quietly.
-        let nobody = Notifier::parse(OsStr::new("/nonexistent/vr-talex/notify")).unwrap();
+        let nobody = Notifier::parse(OsStr::new("/nonexistent/vr-telex/notify")).unwrap();
         assert!(nobody.try_send("READY=1").is_err());
         nobody.send("READY=1");
     }
@@ -536,7 +536,7 @@ mod tests {
         listener.notifier().send("READY=1");
         assert_eq!(listener.next(), "READY=1");
 
-        let name = format!("vr-talex-test-{}", std::process::id());
+        let name = format!("vr-telex-test-{}", std::process::id());
         let addr = SocketAddr::from_abstract_name(name.as_bytes()).unwrap();
         let socket = UnixDatagram::bind_addr(&addr).unwrap();
         socket
