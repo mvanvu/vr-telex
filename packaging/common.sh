@@ -7,23 +7,29 @@
 # (SEC-23).
 
 SCHEMA=org.gnome.desktop.input-sources
-VR_SOURCE="('ibus', 'vr-talex')"
-UNIT=vr-talex.service
+VR_SOURCE="('ibus', 'vr-telex')"
+UNIT=vr-telex.service
 FCITX_NAME=org.fcitx.Fcitx5
 FCITX_UNIT=fcitx5.service
 IBUS_GNOME_UNIT=org.freedesktop.IBus.session.GNOME.service
-TIMEOUT=${VR_TALEX_TIMEOUT:-10}
+TIMEOUT=${VR_TELEX_TIMEOUT:-10}
 
-say() { printf 'vr-talex: %s\n' "$*"; }
-warn() { printf 'vr-talex: warning: %s\n' "$*" >&2; }
+# The project was first published as vr-talex (D37). These names exist only
+# to find and retire such an install; nothing is ever written under them.
+LEGACY_NAME=vr-talex
+LEGACY_SOURCE="('ibus', '$LEGACY_NAME')"
+LEGACY_UNIT=$LEGACY_NAME.service
+
+say() { printf 'vr-telex: %s\n' "$*"; }
+warn() { printf 'vr-telex: warning: %s\n' "$*" >&2; }
 die() {
-  printf 'vr-talex: error: %s\n' "$*" >&2
+  printf 'vr-telex: error: %s\n' "$*" >&2
   exit 1
 }
 
 require_user() {
   if [ "$(id -u)" -eq 0 ]; then
-    printf 'vr-talex: error: do not run as root or with sudo; run it as your own user\n' >&2
+    printf 'vr-telex: error: do not run as root or with sudo; run it as your own user\n' >&2
     exit 1
   fi
   : "${HOME:?HOME is not set}"
@@ -37,7 +43,7 @@ require_user() {
     *$'\t'* | *$'\n'*) die "HOME contains a tab or newline" ;;
   esac
   case "$TIMEOUT" in
-    '' | *[!0-9]*) die "VR_TALEX_TIMEOUT must be a number of seconds" ;;
+    '' | *[!0-9]*) die "VR_TELEX_TIMEOUT must be a number of seconds" ;;
   esac
 }
 
@@ -63,23 +69,36 @@ init_paths() {
   inside_home "$DATA_HOME" XDG_DATA_HOME
   inside_home "$STATE_HOME" XDG_STATE_HOME
 
-  # The unit runs %h/.local/bin/vr-talex, so this path does not follow XDG.
-  BIN_DST=$HOME/.local/bin/vr-talex
+  # The unit runs %h/.local/bin/vr-telex, so this path does not follow XDG.
+  BIN_DST=$HOME/.local/bin/vr-telex
   case "$BIN_DST" in
     *'"'* | *'\'*) die "HOME contains a double quote or backslash, which the D-Bus service file cannot hold" ;;
   esac
   UNIT_DIR=$CONFIG_HOME/systemd/user
   UNIT_DST=$UNIT_DIR/$UNIT
   WANTS_DIR=$UNIT_DIR/graphical-session.target.wants
-  ENV_DST=$CONFIG_HOME/environment.d/90-vr-talex.conf
+  ENV_DST=$CONFIG_HOME/environment.d/90-vr-telex.conf
   XINPUTRC=$HOME/.xinputrc
   AUTOSTART_DST=$CONFIG_HOME/autostart/org.fcitx.Fcitx5.desktop
   DBUS_SVC_DST=$DATA_HOME/dbus-1/services/org.fcitx.Fcitx5.service
   IBUS_BUS_DIR=$CONFIG_HOME/ibus/bus
-  STATE_DIR=$DATA_HOME/vr-talex
+  STATE_DIR=$DATA_HOME/vr-telex
   BACKUP_DIR=$STATE_DIR/backup
   MANIFEST=$BACKUP_DIR/manifest
-  DAEMON_STATE_DIR=$STATE_HOME/vr-talex
+  DAEMON_STATE_DIR=$STATE_HOME/vr-telex
+  RUNTIME_BASE=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+
+  LEGACY_BIN=$HOME/.local/bin/$LEGACY_NAME
+  LEGACY_UNIT_DST=$UNIT_DIR/$LEGACY_UNIT
+  LEGACY_ENV=$CONFIG_HOME/environment.d/90-$LEGACY_NAME.conf
+  LEGACY_STATE_DIR=$DATA_HOME/$LEGACY_NAME
+  LEGACY_BACKUP=$LEGACY_STATE_DIR/backup
+  LEGACY_MANIFEST=$LEGACY_BACKUP/manifest
+  LEGACY_DAEMON_STATE_DIR=$STATE_HOME/$LEGACY_NAME
+  LEGACY_RUNTIME_DIR=$RUNTIME_BASE/$LEGACY_NAME
+  # Written into the vr-telex backup when it was copied from the vr-talex
+  # one, so the vr-talex backup may go once the move is complete.
+  FROM_LEGACY=$BACKUP_DIR/from-$LEGACY_NAME
 
   MANAGED_FILES=("$BIN_DST" "$UNIT_DST" "$ENV_DST" "$XINPUTRC" "$AUTOSTART_DST" "$DBUS_SVC_DST")
   MANAGED_DIRS=("$HOME/.local" "$HOME/.local/bin"
@@ -143,7 +162,7 @@ reload_bus() {
 
 unit_pid() {
   local pid
-  pid=$(systemctl --user show -p MainPID --value "$UNIT" 2>/dev/null) || pid=0
+  pid=$(systemctl --user show -p MainPID --value "${1:-$UNIT}" 2>/dev/null) || pid=0
   case "$pid" in
     '' | *[!0-9]*) pid=0 ;;
   esac
@@ -172,19 +191,22 @@ gs_put() {
   fi
 }
 
-# A source list without the vr-talex entry.
-without_vr() {
-  local items
+# A source list without the entry $2.
+without_source() {
+  local items src=$2
   items=$(list_items "$1")
-  items=${items//"$VR_SOURCE, "/}
-  items=${items//", $VR_SOURCE"/}
-  items=${items//"$VR_SOURCE"/}
+  items=${items//"$src, "/}
+  items=${items//", $src"/}
+  items=${items//"$src"/}
   if [ -z "$items" ]; then printf '@a(ss) []'; else printf '[%s]' "$items"; fi
 }
 
+# A source list without the vr-telex entry.
+without_vr() { without_source "$1" "$VR_SOURCE"; }
+
 # Restore one key. When it still holds what install wrote, the saved value
 # comes back; when the user changed it since (a layout added, another
-# source selected), only the vr-talex entry is taken out.
+# source selected), only the vr-telex entry is taken out.
 gs_restore() {
   local key=$1 saved=$2 installed=$3 cur new
   cur=$(gs_get "$key") || return 1
@@ -294,7 +316,7 @@ replace_with() {
   local src=$1 dst=$2 dir tmp
   dir=$(dirname -- "$dst")
   mkdir -p -- "$dir" || return 1
-  tmp=$(mktemp -d "$dir/.vr-talex-tmp.XXXXXX") || return 1
+  tmp=$(mktemp -d "$dir/.vr-telex-tmp.XXXXXX") || return 1
   if cp -a -- "$src" "$tmp/entry" 2>/dev/null && mv -fT -- "$tmp/entry" "$dst"; then
     rmdir -- "$tmp"
     return 0
@@ -308,7 +330,7 @@ replace_with() {
 # reads (environment.d only reads *.conf, autostart only *.desktop).
 keep_user_copy() {
   local dst=$1 saved
-  saved="$dst.vr-talex-saved-$(date +%Y%m%d-%H%M%S)"
+  saved="$dst.vr-telex-saved-$(date +%Y%m%d-%H%M%S)"
   if exists "$saved"; then saved="$saved-$$"; fi
   mv -T -- "$dst" "$saved" || return 1
   warn "$dst was changed after install; your version is kept as $saved"
@@ -317,7 +339,7 @@ keep_user_copy() {
 # Record what install wrote, so uninstall can tell the user's later edits
 # from its own files.
 # Called before dst is written: if the record cannot be made, nothing has
-# been written yet, so a rollback never meets an unrecorded vr-talex file.
+# been written yet, so a rollback never meets an unrecorded vr-telex file.
 record_installed() {
   local src=$1 mode=$2 dst=$3 r dir tmp
   r=$(rel "$dst")
@@ -363,7 +385,7 @@ restore_entry() {
     elif exists "$inst"; then
       keep_user_copy "$dst" || RESTORE_FAILED+=("$dst")
     else
-      warn "$dst was not written by vr-talex; left in place"
+      warn "$dst was not written by vr-telex; left in place"
     fi
     return 0
   fi
@@ -381,11 +403,11 @@ restore_entry() {
 # rollback of a failed install (SEC-19, SEC-21). Every step runs even when
 # one fails; any failure keeps the backup and makes this return 1.
 restore_all() {
-  local i rel dst vr_pid f d key svc_rel
+  local i rel dst vr_pid legacy_pid u f d key svc_rel
   RESTORE_FAILED=()
   load_manifest
 
-  # Input sources first, so the shell leaves the vr-talex source while the
+  # Input sources first, so the shell leaves the vr-telex source while the
   # daemon still answers; mru-sources before sources, because gnome-shell
   # activates the head of the MRU list when sources changes.
   for key in mru-sources sources; do
@@ -398,7 +420,7 @@ restore_all() {
 
   # The D-Bus activation shadow goes first, and the bus drops it, before the
   # unit stops: a client call to org.fcitx.Fcitx5 after the stop would
-  # otherwise start vr-talex again, and that process would keep the name
+  # otherwise start vr-telex again, and that process would keep the name
   # after its unit file is gone, so fcitx5 could not take it back.
   svc_rel=$(rel "$DBUS_SVC_DST")
   if in_list "$svc_rel" "${M_ABSENT[@]}"; then
@@ -409,9 +431,14 @@ restore_all() {
   reload_bus
 
   vr_pid=$(unit_pid)
-  if systemctl --user is-enabled --quiet "$UNIT" 2>/dev/null || systemctl --user is-active --quiet "$UNIT" 2>/dev/null; then
-    systemctl --user disable --now "$UNIT" >/dev/null 2>&1 || warn "could not stop $UNIT"
-  fi
+  legacy_pid=$(unit_pid "$LEGACY_UNIT")
+  # A vr-talex unit still running (uninstall of an install under the old
+  # name) holds org.fcitx.Fcitx5 too, so fcitx5 could not come back.
+  for u in "$UNIT" "$LEGACY_UNIT"; do
+    if systemctl --user is-enabled --quiet "$u" 2>/dev/null || systemctl --user is-active --quiet "$u" 2>/dev/null; then
+      systemctl --user disable --now "$u" >/dev/null 2>&1 || warn "could not stop $u"
+    fi
+  done
 
   for rel in "${M_ABSENT[@]}"; do
     [ "$rel" = "$svc_rel" ] || restore_entry "$rel" absent
@@ -420,13 +447,15 @@ restore_all() {
     [ "$rel" = "$svc_rel" ] || restore_entry "$rel" present
   done
 
-  # IBus address files vr-talex published that did not exist before.
+  # IBus address files vr-telex published that did not exist before.
   if [ -d "$IBUS_BUS_DIR" ]; then
     for f in "$IBUS_BUS_DIR"/*; do
       [ -f "$f" ] && [ ! -L "$f" ] || continue
       in_list "$(rel "$f")" "${M_PRESENT[@]}" && continue
       if { [ "$vr_pid" != 0 ] && grep -qx "IBUS_DAEMON_PID=$vr_pid" "$f"; } ||
-        grep -q "^IBUS_ADDRESS=unix:path=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/vr-talex/" "$f"; then
+        { [ "$legacy_pid" != 0 ] && grep -qx "IBUS_DAEMON_PID=$legacy_pid" "$f"; } ||
+        grep -qF "IBUS_ADDRESS=unix:path=$RUNTIME_BASE/vr-telex/" "$f" ||
+        grep -qF "IBUS_ADDRESS=unix:path=$LEGACY_RUNTIME_DIR/" "$f"; then
         rm -f -- "$f"
       fi
     done
@@ -465,8 +494,14 @@ restore_all() {
     warn "the backup is kept in $BACKUP_DIR; fix the cause, then run $REPO/uninstall.sh again"
     return 1
   fi
-  rm -rf -- "${DATA_HOME:?}/vr-talex/backup"
-  # Directories install created, deepest first; non-empty ones stay.
+  rm -rf -- "${DATA_HOME:?}/vr-telex/backup"
+  remove_created_dirs
+}
+
+# Directories install created (from the loaded manifest), deepest first;
+# non-empty ones stay.
+remove_created_dirs() {
+  local d
   for d in "${M_DIRS[@]}" "$(rel "$DAEMON_STATE_DIR")"; do
     printf '%s\t%s\n' "$(tr -cd / <<<"$d" | wc -c)" "$d"
   done | sort -rn | cut -f2- | while IFS= read -r d; do
@@ -475,5 +510,248 @@ restore_all() {
 }
 
 print_recovery() {
-  say "if typing stops working: run 'systemctl --user disable --now vr-talex.service', then '$REPO/uninstall.sh'"
+  say "if typing stops working: run 'systemctl --user disable --now vr-telex.service', then '$REPO/uninstall.sh'"
+}
+
+# --- legacy vr-talex install (D37) ---------------------------------------------
+#
+# install.sh moves a vr-talex install to vr-telex; uninstall.sh removes one.
+# Only files the vr-talex installer wrote are removed (SEC-24): a file at a
+# vr-talex path counts as ours when it equals the copy that installer kept in
+# backup/installed/, or, without that copy, its template. A binary has no
+# template, so without the copy it is never taken for ours: a wrapper script
+# of the user's at that path would match any content test.
+
+# A packaging template as the vr-talex installer wrote it: the files differ
+# only in the name.
+legacy_template() { sed "s/vr-telex/$LEGACY_NAME/g" "$REPO/packaging/$1"; }
+
+# The D-Bus activation file the vr-talex installer wrote.
+legacy_render_dbus_svc() {
+  local svc
+  svc=$(<"$REPO/packaging/org.fcitx.Fcitx5.service")
+  svc=${svc//"SystemdService=$UNIT"/"SystemdService=$LEGACY_UNIT"}
+  printf '%s\n' "${svc//@BIN@/"\"$LEGACY_BIN\""}"
+}
+
+legacy_is_ours() {
+  local f=$1 rec
+  [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  rec=$LEGACY_BACKUP/installed/$(rel "$f")
+  if [ -f "$rec" ] && [ ! -L "$rec" ] && [ ! -L "$LEGACY_STATE_DIR" ] && [ ! -L "$LEGACY_BACKUP" ]; then
+    same_entry "$f" "$rec"
+    return $?
+  fi
+  case "$f" in
+    "$LEGACY_UNIT_DST") cmp -s -- <(legacy_template vr-telex.service) "$f" ;;
+    "$LEGACY_ENV") cmp -s -- <(legacy_template 90-vr-telex.conf) "$f" ;;
+    *) return 1 ;;
+  esac
+}
+
+# Any sign of a vr-talex install: one of its own files, its backup or mode
+# file, or its unit. A file of the user's that only has a vr-talex name is
+# not one. Settings are not read here (see legacy_source_listed).
+legacy_found() {
+  exists "$LEGACY_STATE_DIR" && return 0
+  exists "$LEGACY_DAEMON_STATE_DIR/mode" && return 0
+  legacy_is_ours "$LEGACY_UNIT_DST" && return 0
+  legacy_is_ours "$LEGACY_BIN" && return 0
+  legacy_is_ours "$LEGACY_ENV" && return 0
+  systemctl --user is-enabled --quiet "$LEGACY_UNIT" 2>/dev/null && return 0
+  systemctl --user is-active --quiet "$LEGACY_UNIT" 2>/dev/null && return 0
+  return 1
+}
+
+# The vr-talex input source is still listed (alone it is a dead entry, left
+# by an uninstall of vr-talex without a backup).
+legacy_source_listed() {
+  local key
+  for key in sources mru-sources; do
+    case "$(gs_get "$key" 2>/dev/null)" in *"$LEGACY_SOURCE"*) return 0 ;; esac
+  done
+  return 1
+}
+
+legacy_stop_unit() {
+  if systemctl --user is-enabled --quiet "$LEGACY_UNIT" 2>/dev/null ||
+    systemctl --user is-active --quiet "$LEGACY_UNIT" 2>/dev/null; then
+    say "stopping $LEGACY_UNIT (the old name of this input method)"
+    systemctl --user disable --now "$LEGACY_UNIT" >/dev/null 2>&1 || return 1
+  fi
+  return 0
+}
+
+# A source list with the vr-talex entry renamed in place, so the order and
+# the other entries stay; dropped instead when vr-telex is listed already.
+legacy_renamed_sources() {
+  local v=$1 items
+  case "$v" in
+    *"$LEGACY_SOURCE"*) ;;
+    *)
+      printf '%s' "$v"
+      return 0
+      ;;
+  esac
+  case "$v" in
+    *"$VR_SOURCE"*) without_source "$v" "$LEGACY_SOURCE" ;;
+    *)
+      items=$(list_items "$v")
+      printf '[%s]' "${items//"$LEGACY_SOURCE"/"$VR_SOURCE"}"
+      ;;
+  esac
+}
+
+# Rename the input source in both keys, mru-sources first (gnome-shell
+# activates the head of the MRU list when sources changes).
+legacy_rename_sources() {
+  local key cur new
+  for key in mru-sources sources; do
+    cur=$(gs_get "$key") || return 1
+    new=$(legacy_renamed_sources "$cur")
+    [ "$new" = "$cur" ] && continue
+    case "$cur" in
+      "[("*")]") ;;
+      *) die "unexpected $key value: $cur" ;;
+    esac
+    gsettings set "$SCHEMA" "$key" "$new" || return 1
+  done
+}
+
+# Drop a left-over vr-talex entry from both keys (its engine is gone).
+legacy_drop_sources() {
+  local key cur new
+  for key in mru-sources sources; do
+    cur=$(gs_get "$key") || return 1
+    case "$cur" in *"$LEGACY_SOURCE"*) ;; *) continue ;; esac
+    new=$(without_source "$cur" "$LEGACY_SOURCE")
+    gs_put "$key" "$new" || return 1
+    say "removed the old vr-talex entry from input sources ($key)"
+  done
+}
+
+legacy_map_rel() {
+  local r=$1
+  case "$r" in
+    "$(rel "$LEGACY_BIN")") rel "$BIN_DST" ;;
+    "$(rel "$LEGACY_UNIT_DST")") rel "$UNIT_DST" ;;
+    "$(rel "$LEGACY_ENV")") rel "$ENV_DST" ;;
+    "$(rel "$LEGACY_STATE_DIR")") rel "$STATE_DIR" ;;
+    "$(rel "$LEGACY_DAEMON_STATE_DIR")") rel "$DAEMON_STATE_DIR" ;;
+    *) printf '%s' "$r" ;;
+  esac
+}
+
+# Turn a copy of the vr-talex backup ($1) into the vr-telex one: paths and
+# the input source in the manifest, the recorded input sources, and the
+# saved and recorded files under their new names. Returns 1 on anything it
+# does not know, before the copy is put in place.
+legacy_rewrite_backup() {
+  local b=$1 kind a c out='' r n sub k v gs=''
+  [ -f "$b/manifest" ] && [ ! -L "$b/manifest" ] || return 1
+  while IFS=$'\t' read -r kind a c || [ -n "$kind" ]; do
+    case "$kind" in
+      v)
+        [ "$a" = 1 ] || return 1
+        out+="v"$'\t'"$a"$'\n'
+        ;;
+      dir) out+="dir"$'\t'"$(legacy_map_rel "$a")"$'\n' ;;
+      file) out+="file"$'\t'"$(legacy_map_rel "$a")"$'\t'"$c"$'\n' ;;
+      gs) out+="gs"$'\t'"$a"$'\t'"${c//"$LEGACY_SOURCE"/"$VR_SOURCE"}"$'\n' ;;
+      fcitx5) out+="fcitx5"$'\t'"$a"$'\t'"$c"$'\n' ;;
+      *) return 1 ;;
+    esac
+  done <"$b/manifest"
+  printf '%s' "$out" >"$b/manifest.tmp" && mv -f -- "$b/manifest.tmp" "$b/manifest" || return 1
+
+  if [ -f "$b/installed.gs" ]; then
+    while IFS=$'\t' read -r k v || [ -n "$k" ]; do
+      gs+="$k"$'\t'"${v//"$LEGACY_SOURCE"/"$VR_SOURCE"}"$'\n'
+    done <"$b/installed.gs"
+    printf '%s' "$gs" >"$b/installed.gs.tmp" && mv -f -- "$b/installed.gs.tmp" "$b/installed.gs" || return 1
+  fi
+
+  for r in "$(rel "$LEGACY_BIN")" "$(rel "$LEGACY_UNIT_DST")" "$(rel "$LEGACY_ENV")"; do
+    n=$(legacy_map_rel "$r")
+    for sub in files installed; do
+      exists "$b/$sub/$r" || continue
+      mkdir -p -- "$(dirname -- "$b/$sub/$n")" && mv -T -- "$b/$sub/$r" "$b/$sub/$n" || return 1
+    done
+  done
+  : >"$b/$(basename -- "$FROM_LEGACY")" || return 1
+}
+
+# Copy the vr-talex backup to the vr-telex place, rewritten. The vr-talex
+# one stays until the move is complete (legacy_cleanup), so a failed install
+# can return to it. The copy appears in one rename, never half-written.
+legacy_copy_backup() {
+  local tmp
+  if [ -L "$LEGACY_STATE_DIR" ] || [ -L "$LEGACY_BACKUP" ] || [ -L "$LEGACY_MANIFEST" ]; then
+    die "refusing a symlinked vr-talex backup ($LEGACY_BACKUP)"
+  fi
+  if [ -L "$STATE_DIR" ] || [ -L "$BACKUP_DIR" ]; then die "refusing a symlinked backup dir ($BACKUP_DIR)"; fi
+  # A partial backup from an interrupted first run holds no manifest.
+  if [ -d "$BACKUP_DIR" ]; then rm -rf -- "${DATA_HOME:?}/vr-telex/backup"; fi
+  mkdir -p -- "$STATE_DIR" || die "cannot create $STATE_DIR"
+  tmp=$(mktemp -d "$STATE_DIR/.backup-tmp.XXXXXX") || die "cannot write in $STATE_DIR"
+  if cp -a -- "$LEGACY_BACKUP/." "$tmp/" && legacy_rewrite_backup "$tmp" && mv -T -- "$tmp" "$BACKUP_DIR"; then
+    say "moved the saved setup from $LEGACY_BACKUP to $BACKUP_DIR"
+    return 0
+  fi
+  rm -rf -- "${tmp:?}"
+  die "cannot copy the vr-talex backup $LEGACY_BACKUP (nothing was changed)"
+}
+
+# Remove one vr-talex file when it is ours; leave it, with a warning, when not.
+legacy_retire_file() {
+  local f=$1
+  exists "$f" || return 0
+  if legacy_is_ours "$f"; then
+    rm -f -- "$f" || warn "could not remove $f"
+  elif [ "$f" = "$LEGACY_BIN" ] && [ ! -f "$LEGACY_BACKUP/installed/$(rel "$f")" ]; then
+    warn "$f cannot be told apart from a file of yours (vr-talex left no record of it); left in place, remove it by hand if it is the old vr-talex binary"
+  else
+    warn "$f is not the file vr-talex installed; left in place"
+  fi
+}
+
+# What is left of vr-talex once vr-telex took over or was removed: its unit,
+# binary and environment file (when ours), its stale runtime files and IBus
+# address files, its mode file, and its backup when the vr-telex backup was
+# copied from it ($1 = 1). Never fails; problems are warnings.
+legacy_cleanup() {
+  local drop_backup=$1 f
+  legacy_stop_unit || warn "could not stop $LEGACY_UNIT"
+  legacy_retire_file "$LEGACY_UNIT_DST"
+  legacy_retire_file "$LEGACY_BIN"
+  legacy_retire_file "$LEGACY_ENV"
+  systemctl --user daemon-reload >/dev/null 2>&1 || warn "systemctl --user daemon-reload failed"
+
+  # Its address files point at a socket that is gone.
+  if [ -d "$IBUS_BUS_DIR" ]; then
+    for f in "$IBUS_BUS_DIR"/*; do
+      [ -f "$f" ] && [ ! -L "$f" ] || continue
+      if grep -qF "IBUS_ADDRESS=unix:path=$LEGACY_RUNTIME_DIR/" "$f"; then rm -f -- "$f" || warn "could not remove $f"; fi
+    done
+  fi
+  # The daemon's own entries only (instance lock and socket).
+  if [ -d "$LEGACY_RUNTIME_DIR" ] && [ ! -L "$LEGACY_RUNTIME_DIR" ]; then
+    rm -f -- "$LEGACY_RUNTIME_DIR/ibus.lock" "$LEGACY_RUNTIME_DIR/ibus" || warn "could not clean $LEGACY_RUNTIME_DIR"
+    rmdir -- "$LEGACY_RUNTIME_DIR" 2>/dev/null || true
+  fi
+  if [ -d "$LEGACY_DAEMON_STATE_DIR" ] && [ ! -L "$LEGACY_DAEMON_STATE_DIR" ]; then
+    rm -f -- "$LEGACY_DAEMON_STATE_DIR/mode" || warn "could not remove $LEGACY_DAEMON_STATE_DIR/mode"
+    rmdir -- "$LEGACY_DAEMON_STATE_DIR" 2>/dev/null || true
+  fi
+
+  if [ "$drop_backup" = 1 ] && [ ! -L "$LEGACY_STATE_DIR" ]; then
+    if rm -rf -- "${DATA_HOME:?}/vr-talex/backup"; then
+      rmdir -- "$LEGACY_STATE_DIR" 2>/dev/null || warn "$LEGACY_STATE_DIR is not empty; left in place"
+    else
+      warn "could not remove the older backup $LEGACY_BACKUP; it is no longer used, remove it by hand"
+    fi
+  elif exists "$LEGACY_STATE_DIR"; then
+    warn "kept the older backup in $LEGACY_STATE_DIR: the one in $STATE_DIR is used instead; remove it by hand when you no longer need it"
+  fi
+  legacy_drop_sources || warn "could not remove the old vr-talex entry from input sources"
 }

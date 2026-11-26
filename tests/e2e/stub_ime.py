@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stub IBus engine for the e2e harness (stdlib only), used by `run.sh --ime stub`.
 
-It stands in for vr-talex's fe-ibus until the real frontends exist, so the harness can be proven
+It stands in for vr-telex's fe-ibus until the real frontends exist, so the harness can be proven
 end to end (inject -> gnome-shell -> IBus -> app -> readback -> diff). It is a one-service pseudo
 bus on a private path socket (the shape spike T1 proved and the plan chose), writes the IBus address
 file, and implements a word-level Telex by looking up the golden list (keys -> expected); words not
@@ -68,7 +68,7 @@ def text_v(s):
 
 
 ENGINE = d.Variant("(sa{sv}ssssssssussssssss)", (
-    "IBusEngineDesc", {}, "vr-talex", "Telex", "e2e stub engine", "vi", "", "", "", "us", 0,
+    "IBusEngineDesc", {}, "vr-telex", "Telex", "e2e stub engine", "vi", "", "", "", "us", 0,
     "", "VI", "", "", "", "", "", ""))
 
 

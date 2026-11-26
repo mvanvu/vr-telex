@@ -1,5 +1,5 @@
 [package]
-name = "vr-talex"
+name = "vr-telex"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

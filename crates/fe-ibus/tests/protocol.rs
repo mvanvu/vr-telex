@@ -77,7 +77,7 @@ fn the_call_sequence_of_gnome_shell_ends_in_a_typed_word() {
             Some(&panel("RegisterProperties", "vi"))
         );
 
-        let set = shell.ibus("SetGlobalEngine", &("vr-talex",)).await.ok();
+        let set = shell.ibus("SetGlobalEngine", &("vr-telex",)).await.ok();
         assert_eq!(set.before, [], "the reply comes first");
         assert_eq!(
             shell.unasked(QUIET).await,
@@ -695,7 +695,7 @@ fn an_xkb_source_switches_the_ime_off_and_the_engine_back_on() {
         assert_eq!(bus.ime.mode(), Mode::Vi);
 
         // Back to the engine: on again in the kept mode, shown in the indicator.
-        shell.ibus("SetGlobalEngine", &("vr-talex",)).await.ok();
+        shell.ibus("SetGlobalEngine", &("vr-telex",)).await.ok();
         assert_eq!(
             shell.unasked(QUIET).await,
             [
@@ -731,7 +731,7 @@ fn only_the_panel_switches_the_ime_off() {
         assert_eq!(denied.error().as_deref(), Some(ACCESS_DENIED));
         assert!(bus.ime.enabled());
         // Selecting the engine stays harmless for anyone.
-        app.ibus("SetGlobalEngine", &("vr-talex",)).await.ok();
+        app.ibus("SetGlobalEngine", &("vr-telex",)).await.ok();
         assert!(bus.ime.enabled());
 
         // Names that are neither the engine nor a bounded xkb name are refused.

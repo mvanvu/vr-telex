@@ -1,3 +1,3 @@
-# Written by the vr-talex installer (im-config mode "none": im-launch starts
+# Written by the vr-telex installer (im-config mode "none": im-launch starts
 # no input method framework at login). uninstall.sh restores the old file.
 run_im none

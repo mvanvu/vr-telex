@@ -23,7 +23,7 @@ pub(crate) const PROPERTIES_IFACE: &str = "org.freedesktop.DBus.Properties";
 pub(crate) const PEER_IFACE: &str = "org.freedesktop.DBus.Peer";
 pub(crate) const CONTEXT_PATH_PREFIX: &str = "/org/freedesktop/IBus/InputContext_";
 
-pub(crate) const ENGINE_NAME: &str = "vr-talex";
+pub(crate) const ENGINE_NAME: &str = "vr-telex";
 
 /// `IBusCapabilite` bits of `SetCapabilities`.
 pub(crate) const CAP_PREEDIT_TEXT: u32 = 1 << 0;
@@ -299,7 +299,7 @@ mod tests {
         assert_eq!(signature(&value), "(sa{sv}ssssssssussssssss)");
         let fields = fields(&value);
         assert_eq!(string(&fields[0]), "IBusEngineDesc");
-        assert_eq!(string(&fields[2]), "vr-talex");
+        assert_eq!(string(&fields[2]), "vr-telex");
         // GNOME Shell names the source "<language name> (<longname>)" (ui/status/keyboard.js):
         // language "vi" and longname "Telex" read "Vietnamese (Telex)".
         assert_eq!(string(&fields[3]), "Telex");

@@ -9,7 +9,7 @@
 # session bus and the running fcitx5 are never touched (D2, SEC-29).
 #
 # Usage: bash tests/install/run.sh [scenario...]
-#   VR_TALEX_TEST_DIR  where sandboxes and logs go (default: a new temp dir,
+#   VR_TELEX_TEST_DIR  where sandboxes and logs go (default: a new temp dir,
 #                      removed when every scenario passes)
 set -euo pipefail
 
@@ -22,7 +22,10 @@ SCENARIOS=(fresh_fcitx5 fresh_no_fcitx5 empty_sources broken_daemon root_refused
   reinstall_backup_deleted special_home rerun_failure bad_xdg edited_then_reinstall
   record_write_fails unit_restart_policy uninstall_activation_gap
   uninstall_activation_gap_no_backup fcitx5_owns_ibus_portal ibus_beside_fcitx5_refused reselect_on_rerun
-  reselect_rerun_failure reselect_keeps_user_edits)
+  reselect_rerun_failure reselect_keeps_user_edits
+  legacy_migrate legacy_rollback legacy_both_dirs legacy_foreign_file foreign_legacy_name_only
+  uninstall_legacy legacy_without_backup legacy_source_only
+  legacy_rollback_restore_fails legacy_backup_rm_fails legacy_rollback_default_key)
 # A HOME with a space, an ampersand and a quote (special_home scenario).
 SPECIAL_HOME_NAME="h o&m'e"
 
@@ -30,11 +33,11 @@ SPECIAL_HOME_NAME="h o&m'e"
 
 run_all() {
   local root keep=1 failed=0 name sb log rc
-  if [ -n "${VR_TALEX_TEST_DIR:-}" ]; then
-    root=$VR_TALEX_TEST_DIR
+  if [ -n "${VR_TELEX_TEST_DIR:-}" ]; then
+    root=$VR_TELEX_TEST_DIR
     mkdir -p "$root"
   else
-    root=$(mktemp -d "${TMPDIR:-/tmp}/vr-talex-install-test.XXXXXX")
+    root=$(mktemp -d "${TMPDIR:-/tmp}/vr-telex-install-test.XXXXXX")
     keep=0
   fi
   root=$(cd "$root" && pwd -P)
@@ -62,8 +65,8 @@ run_all() {
       XDG_RUNTIME_DIR="$sb/run" \
       XDG_CURRENT_DESKTOP=ubuntu:GNOME \
       GSETTINGS_BACKEND=keyfile \
-      VR_TALEX_BIN="$STUBS/fake-ime" \
-      VR_TALEX_TIMEOUT=5 \
+      VR_TELEX_BIN="$STUBS/fake-ime" \
+      VR_TELEX_TIMEOUT=5 \
       T8_SANDBOX="$sb" T8_REPO="$REPO" T8_STUBS="$STUBS" \
       dbus-run-session --config-file="$sb/bus.conf" -- \
       bash "$HERE/run.sh" --in-sandbox "$name" >"$log" 2>&1 || rc=$?
@@ -176,52 +179,53 @@ pre_state_fcitx5() {
 
 expect_installed() {
   local main
-  main=$(systemctl --user show -p MainPID --value vr-talex.service)
-  check "vr-talex unit active" systemctl --user is-active --quiet vr-talex.service
-  check "vr-talex unit enabled" systemctl --user is-enabled --quiet vr-talex.service
+  main=$(systemctl --user show -p MainPID --value vr-telex.service)
+  check "vr-telex unit active" systemctl --user is-active --quiet vr-telex.service
+  check "vr-telex unit enabled" systemctl --user is-enabled --quiet vr-telex.service
   check "org.fcitx.Fcitx5 owned by the unit's MainPID ($main)" [ "$(owner_pid org.fcitx.Fcitx5)" = "$main" ]
   check "IBus address file holds the daemon pid" addr_file_pid_is "$main"
-  check "binary installed 0755" [ "$(stat -c %a "$HOME/.local/bin/vr-talex")" = 755 ]
-  check "binary is VR_TALEX_BIN" cmp -s "$VR_TALEX_BIN" "$HOME/.local/bin/vr-talex"
-  check "unit = packaging template" cmp -s "$T8_REPO/packaging/vr-talex.service" "$XDG_CONFIG_HOME/systemd/user/vr-talex.service"
-  check "environment.d = packaging template" cmp -s "$T8_REPO/packaging/90-vr-talex.conf" "$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf"
-  check "environment.d sets QT_IM_MODULE=fcitx (D27)" grep -qx 'QT_IM_MODULE=fcitx' "$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf"
+  check "binary installed 0755" [ "$(stat -c %a "$HOME/.local/bin/vr-telex")" = 755 ]
+  check "binary is VR_TELEX_BIN" cmp -s "$VR_TELEX_BIN" "$HOME/.local/bin/vr-telex"
+  check "unit = packaging template" cmp -s "$T8_REPO/packaging/vr-telex.service" "$XDG_CONFIG_HOME/systemd/user/vr-telex.service"
+  check "environment.d = packaging template" cmp -s "$T8_REPO/packaging/90-vr-telex.conf" "$XDG_CONFIG_HOME/environment.d/90-vr-telex.conf"
+  check "environment.d sets QT_IM_MODULE=fcitx (D27)" grep -qx 'QT_IM_MODULE=fcitx' "$XDG_CONFIG_HOME/environment.d/90-vr-telex.conf"
   check "xinputrc = packaging template" cmp -s "$T8_REPO/packaging/xinputrc" "$HOME/.xinputrc"
   check "autostart override = packaging template" cmp -s "$T8_REPO/packaging/org.fcitx.Fcitx5.desktop" "$XDG_CONFIG_HOME/autostart/org.fcitx.Fcitx5.desktop"
   check "autostart override hides fcitx5" grep -qx 'Hidden=true' "$XDG_CONFIG_HOME/autostart/org.fcitx.Fcitx5.desktop"
-  check "D-Bus activation shadow execs vr-talex (quoted)" grep -qxF "Exec=\"$HOME/.local/bin/vr-talex\"" "$XDG_DATA_HOME/dbus-1/services/org.fcitx.Fcitx5.service"
-  check "backup manifest exists" [ -f "$XDG_DATA_HOME/vr-talex/backup/manifest" ]
-  check "backup dir is 0700" [ "$(stat -c %a "$XDG_DATA_HOME/vr-talex/backup")" = 700 ]
-  check "vr-talex source present exactly once" [ "$(gs sources | grep -o "('ibus', 'vr-talex')" | wc -l)" = 1 ]
-  check "vr-talex source selected (first in mru-sources)" [ "$(gs mru-sources | cut -c1-21)" = "[('ibus', 'vr-talex')" ]
+  check "D-Bus activation shadow execs vr-telex (quoted)" grep -qxF "Exec=\"$HOME/.local/bin/vr-telex\"" "$XDG_DATA_HOME/dbus-1/services/org.fcitx.Fcitx5.service"
+  check "backup manifest exists" [ -f "$XDG_DATA_HOME/vr-telex/backup/manifest" ]
+  check "backup dir is 0700" [ "$(stat -c %a "$XDG_DATA_HOME/vr-telex/backup")" = 700 ]
+  check "vr-telex source present exactly once" [ "$(gs sources | grep -o "('ibus', 'vr-telex')" | wc -l)" = 1 ]
+  check "vr-telex source selected (first in mru-sources)" [ "$(gs mru-sources | cut -c1-21)" = "[('ibus', 'vr-telex')" ]
 }
 
-# The vr-talex start after line $1 of the stub log found vr-talex at the head
+# The vr-telex start after line $1 of the stub log found vr-telex at the head
 # of mru-sources: a running gnome-shell reads that list when the daemon
 # connects, so this is what makes it select Vietnamese (Telex) (D33).
 started_with_vr_head() {
   local line
-  line=$(tail -n +$(($1 + 1)) "$XDG_RUNTIME_DIR/stub-calls.log" | grep '^started vr-talex.service ' | tail -n 1 || true)
-  printf '  %s\n' "${line:-no vr-talex start logged}"
+  line=$(tail -n +$(($1 + 1)) "$XDG_RUNTIME_DIR/stub-calls.log" | grep '^started vr-telex.service ' | tail -n 1 || true)
+  printf '  %s\n' "${line:-no vr-telex start logged}"
   case "$line" in
-    "started vr-talex.service mru-sources=[('ibus', 'vr-talex')"*) return 0 ;;
+    "started vr-telex.service mru-sources=[('ibus', 'vr-telex')"*) return 0 ;;
   esac
   return 1
 }
 
-expect_no_vr_talex_left() {
+expect_no_vr_telex_left() {
   local hits='' f
-  # The sandbox path itself contains "vr-talex" (the checkout's name), so it
-  # is cut out of each file before looking for the string.
+  # The sandbox path itself may contain the name (the checkout's name), so it
+  # is cut out of each file before looking for the string. The old name
+  # vr-talex (D37) counts too.
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    if sed "s|$T8_SANDBOX||g" "$f" | grep -q vr-talex; then hits="$hits $f"; fi
-    case "${f#"$HOME"}" in *vr-talex*) hits="$hits $f" ;; esac
-  done < <(grep -rl vr-talex "$XDG_CONFIG_HOME" "$HOME/.local" "$HOME/.xinputrc" 2>/dev/null || true; \
-    find "$XDG_CONFIG_HOME" "$HOME/.local" -name '*vr-talex*' 2>/dev/null || true)
-  check "no vr-talex string left in ~/.config, ~/.local, ~/.xinputrc" [ -z "$hits" ]
+    if sed "s|$T8_SANDBOX||g" "$f" | grep -qE 'vr-t[ae]lex'; then hits="$hits $f"; fi
+    case "${f#"$HOME"}" in *vr-telex* | *vr-talex*) hits="$hits $f" ;; esac
+  done < <(grep -rlE 'vr-t[ae]lex' "$XDG_CONFIG_HOME" "$HOME/.local" "$HOME/.xinputrc" 2>/dev/null || true; \
+    find "$XDG_CONFIG_HOME" "$HOME/.local" -name '*vr-telex*' -o -name '*vr-talex*' 2>/dev/null || true)
+  check "no vr-telex or vr-talex string left in ~/.config, ~/.local, ~/.xinputrc" [ -z "$hits" ]
   [ -z "$hits" ] || printf '  left: %s\n' "$hits"
-  check "vr-talex unit inactive" sh -c '! systemctl --user is-active --quiet vr-talex.service'
+  check "vr-telex unit inactive" sh -c '! systemctl --user is-active --quiet vr-telex.service'
 }
 
 # --- scenarios -------------------------------------------------------------
@@ -240,13 +244,13 @@ t_fresh_fcitx5() {
   expect_installed
   check "keyfile after install" diff -u - "$(keyfile)" <<'EOF'
 [org/gnome/desktop/input-sources]
-sources=[('xkb', 'us'), ('ibus', 'vr-talex')]
-mru-sources=[('ibus', 'vr-talex'), ('xkb', 'us')]
+sources=[('xkb', 'us'), ('ibus', 'vr-telex')]
+mru-sources=[('ibus', 'vr-telex'), ('xkb', 'us')]
 EOF
-  check "pre-existing xinputrc backed up byte for byte" cmp -s "$T8_SANDBOX/pre.xinputrc" "$XDG_DATA_HOME/vr-talex/backup/files/.xinputrc"
-  check "daemon started only after vr-talex was first in mru-sources (D33)" started_with_vr_head 0
+  check "pre-existing xinputrc backed up byte for byte" cmp -s "$T8_SANDBOX/pre.xinputrc" "$XDG_DATA_HOME/vr-telex/backup/files/.xinputrc"
+  check "daemon started only after vr-telex was first in mru-sources (D33)" started_with_vr_head 0
   local main1 calls1
-  main1=$(systemctl --user show -p MainPID --value vr-talex.service)
+  main1=$(systemctl --user show -p MainPID --value vr-telex.service)
   snap "$T8_SANDBOX/inst1.snap" noibus
   cp "$(keyfile)" "$T8_SANDBOX/inst1.keyfile"
   calls1=$(wc -l <"$XDG_RUNTIME_DIR/stub-calls.log")
@@ -257,10 +261,10 @@ EOF
   check "second install leaves the keyfile byte-identical" cmp "$T8_SANDBOX/inst1.keyfile" "$(keyfile)"
   # D33: the shell may have kept another source current; only a daemon
   # reconnect makes it read mru-sources again, so a re-run restarts it.
-  check "second install restarted the daemon (shell re-reads mru-sources)" [ "$(systemctl --user show -p MainPID --value vr-talex.service)" != "$main1" ]
-  check "second install restarted it with vr-talex first in mru-sources" started_with_vr_head "$calls1"
+  check "second install restarted the daemon (shell re-reads mru-sources)" [ "$(systemctl --user show -p MainPID --value vr-telex.service)" != "$main1" ]
+  check "second install restarted it with vr-telex first in mru-sources" started_with_vr_head "$calls1"
   check "second install did not reload units or touch fcitx5" sh -c "tail -n +$((calls1 + 1)) '$XDG_RUNTIME_DIR/stub-calls.log' | grep -Eq 'daemon-reload|fcitx5-remote' && exit 1 || exit 0"
-  check "IBus address file holds the restarted daemon's pid" addr_file_pid_is "$(systemctl --user show -p MainPID --value vr-talex.service)"
+  check "IBus address file holds the restarted daemon's pid" addr_file_pid_is "$(systemctl --user show -p MainPID --value vr-telex.service)"
 
   check "uninstall exits 0" run_uninstall
   snap "$T8_SANDBOX/post.snap" noibus
@@ -272,7 +276,7 @@ EOF
   npid=$(owner_pid org.fcitx.Fcitx5 || echo none)
   check "new owner is the restarted fcitx5" grep -q "^fcitx5 -d" "$XDG_RUNTIME_DIR/stub-calls.log"
   check "IBus address file is fcitx5's again" addr_file_pid_is "$npid"
-  expect_no_vr_talex_left
+  expect_no_vr_telex_left
 }
 
 t_fresh_no_fcitx5() {
@@ -283,14 +287,14 @@ t_fresh_no_fcitx5() {
   expect_installed
   check "keyfile after install" diff -u - "$(keyfile)" <<'EOF'
 [org/gnome/desktop/input-sources]
-sources=[('xkb', 'us'), ('xkb', 'de'), ('ibus', 'vr-talex')]
-mru-sources=[('ibus', 'vr-talex'), ('xkb', 'us'), ('xkb', 'de')]
+sources=[('xkb', 'us'), ('xkb', 'de'), ('ibus', 'vr-telex')]
+mru-sources=[('ibus', 'vr-telex'), ('xkb', 'us'), ('xkb', 'de')]
 EOF
   check "uninstall exits 0" run_uninstall
   snap "$T8_SANDBOX/post.snap"
   check "everything restored exactly, keyfile and IBus dir included" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
   check "fcitx5 not started by uninstall (it did not run before)" no_owner org.fcitx.Fcitx5
-  expect_no_vr_talex_left
+  expect_no_vr_telex_left
 }
 
 t_empty_sources() {
@@ -301,7 +305,7 @@ t_empty_sources() {
   before_rec=$(gsettings list-recursively org.gnome.desktop.input-sources)
   snap "$T8_SANDBOX/pre.snap"
   check "install exits 0" run_install
-  check "vr-talex is the only source" [ "$(gs sources)" = "[('ibus', 'vr-talex')]" ]
+  check "vr-telex is the only source" [ "$(gs sources)" = "[('ibus', 'vr-telex')]" ]
   check "uninstall exits 0" run_uninstall
   check "gsettings values back to defaults" [ "$(gsettings list-recursively org.gnome.desktop.input-sources)" = "$before_rec" ]
   check "sources key no longer set in the keyfile" sh -c "! grep -q '^sources=' '$(keyfile)' 2>/dev/null"
@@ -318,17 +322,17 @@ t_broken_daemon() {
   snap "$T8_SANDBOX/pre.snap" noibus
   cp "$(keyfile)" "$T8_SANDBOX/pre.keyfile"
   local out rc=0
-  out=$(VR_TALEX_BIN="$T8_STUBS/broken-vr-talex" run_install 2>&1) || rc=$?
+  out=$(VR_TELEX_BIN="$T8_STUBS/broken-vr-telex" run_install 2>&1) || rc=$?
   printf '%s\n' "$out"
   check "install with a dying daemon exits non-zero" [ "$rc" -ne 0 ]
-  check "install prints the recovery path" grep -q 'systemctl --user disable --now vr-talex.service' <<<"$out"
+  check "install prints the recovery path" grep -q 'systemctl --user disable --now vr-telex.service' <<<"$out"
   check "install says it rolled back" grep -qi 'rolled back' <<<"$out"
-  check "the failing daemon was started with vr-talex selected (the rollback had sources to undo)" started_with_vr_head 0
+  check "the failing daemon was started with vr-telex selected (the rollback had sources to undo)" started_with_vr_head 0
   snap "$T8_SANDBOX/post.snap" noibus
   check "rollback restored every file" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
   check "sources and mru-sources restored exactly (keyfile byte-identical)" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
   check "fcitx5 runs again after rollback" has_owner org.fcitx.Fcitx5
-  expect_no_vr_talex_left
+  expect_no_vr_telex_left
 }
 
 t_root_refused() {
@@ -353,7 +357,7 @@ t_no_cargo() {
   gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us')]"
   snap "$T8_SANDBOX/pre.snap"
   local out rc=0
-  out=$(env -u VR_TALEX_BIN bash "$T8_REPO/install.sh" 2>&1) || rc=$?
+  out=$(env -u VR_TELEX_BIN bash "$T8_REPO/install.sh" 2>&1) || rc=$?
   printf '%s\n' "$out"
   check "install without cargo exits non-zero" [ "$rc" -ne 0 ]
   check "install without cargo explains" grep -q 'cargo not found' <<<"$out"
@@ -377,17 +381,17 @@ t_ibus_refused() {
 
 t_activation_shadow() {
   # Spike Q6 point 5: an activation request for org.fcitx.Fcitx5 must start
-  # vr-talex, not the real fcitx5.
+  # vr-telex, not the real fcitx5.
   pre_state_fcitx5
   check "install exits 0" run_install
-  systemctl --user stop vr-talex.service
+  systemctl --user stop vr-telex.service
   check "name released after stop" no_owner org.fcitx.Fcitx5
   gdbus call --session --dest org.fcitx.Fcitx5 --object-path / \
     --method org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1 || true
   local apid
   apid=$(owner_pid org.fcitx.Fcitx5 || echo 0)
   check "activation started a process" [ "$apid" != 0 ]
-  check "activated process is ~/.local/bin/vr-talex" grep -q "$HOME/.local/bin/vr-talex" "/proc/$apid/cmdline"
+  check "activated process is ~/.local/bin/vr-telex" grep -q "$HOME/.local/bin/vr-telex" "/proc/$apid/cmdline"
   # Stop the activated stub by the pid recorded above (our own process).
   if [ "$apid" != 0 ]; then
     kill -TERM "$apid"
@@ -395,26 +399,26 @@ t_activation_shadow() {
   fi
   check "uninstall exits 0" run_uninstall
   check "fcitx5 runs again" has_owner org.fcitx.Fcitx5
-  expect_no_vr_talex_left
+  expect_no_vr_telex_left
 }
 
 t_uninstall_without_backup() {
   # The backup was deleted by hand: uninstall removes only what is surely
-  # vr-talex's and leaves the rest (no restore is possible).
+  # vr-telex's and leaves the rest (no restore is possible).
   check "install exits 0" run_install
-  rm -rf -- "${XDG_DATA_HOME:?}/vr-talex/backup"
+  rm -rf -- "${XDG_DATA_HOME:?}/vr-telex/backup"
   local out rc=0
   out=$(run_uninstall 2>&1) || rc=$?
   printf '%s\n' "$out"
   check "uninstall without backup exits 0" [ "$rc" = 0 ]
   check "uninstall warns that no backup exists" grep -q 'no backup found' <<<"$out"
-  check "binary removed" [ ! -e "$HOME/.local/bin/vr-talex" ]
-  check "unit removed" [ ! -e "$XDG_CONFIG_HOME/systemd/user/vr-talex.service" ]
-  check "environment.d file removed" [ ! -e "$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf" ]
+  check "binary removed" [ ! -e "$HOME/.local/bin/vr-telex" ]
+  check "unit removed" [ ! -e "$XDG_CONFIG_HOME/systemd/user/vr-telex.service" ]
+  check "environment.d file removed" [ ! -e "$XDG_CONFIG_HOME/environment.d/90-vr-telex.conf" ]
   check "autostart override removed" [ ! -e "$XDG_CONFIG_HOME/autostart/org.fcitx.Fcitx5.desktop" ]
   check "D-Bus shadow removed" [ ! -e "$XDG_DATA_HOME/dbus-1/services/org.fcitx.Fcitx5.service" ]
   check "our xinputrc removed" [ ! -e "$HOME/.xinputrc" ]
-  check "vr-talex unit inactive" sh -c '! systemctl --user is-active --quiet vr-talex.service'
+  check "vr-telex unit inactive" sh -c '! systemctl --user is-active --quiet vr-telex.service'
 }
 
 t_uninstall_not_installed() {
@@ -428,7 +432,7 @@ t_uninstall_not_installed() {
   check "nothing changed" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
 }
 
-saved_copy() { ls -d "$1".vr-talex-saved-* 2>/dev/null | head -n 1 || true; }
+saved_copy() { ls -d "$1".vr-telex-saved-* 2>/dev/null | head -n 1 || true; }
 
 t_edited_after_install() {
   # Review blocker 2 + major 5: changes the user makes after install survive
@@ -437,9 +441,9 @@ t_edited_after_install() {
   cp "$HOME/.xinputrc" "$T8_SANDBOX/pre.xinputrc"
   check "install exits 0" run_install
   printf 'run_im fcitx5\n# my edit\n' >"$HOME/.xinputrc"
-  printf 'QT_IM_MODULE=user-edit\n' >"$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf"
-  gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('ibus', 'vr-talex'), ('xkb', 'fr')]"
-  gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'fr'), ('ibus', 'vr-talex'), ('xkb', 'us')]"
+  printf 'QT_IM_MODULE=user-edit\n' >"$XDG_CONFIG_HOME/environment.d/90-vr-telex.conf"
+  gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('ibus', 'vr-telex'), ('xkb', 'fr')]"
+  gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'fr'), ('ibus', 'vr-telex'), ('xkb', 'us')]"
   local out rc=0 saved
   out=$(run_uninstall 2>&1) || rc=$?
   printf '%s\n' "$out"
@@ -448,14 +452,14 @@ t_edited_after_install() {
   saved=$(saved_copy "$HOME/.xinputrc")
   check "user's edited ~/.xinputrc kept aside" sh -c "[ -n '$saved' ] && grep -qx '# my edit' '$saved'"
   check "warning names the kept ~/.xinputrc" grep -qF "$saved" <<<"$out"
-  check "environment.d file that install created is gone" [ ! -e "$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf" ]
-  saved=$(saved_copy "$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf")
+  check "environment.d file that install created is gone" [ ! -e "$XDG_CONFIG_HOME/environment.d/90-vr-telex.conf" ]
+  saved=$(saved_copy "$XDG_CONFIG_HOME/environment.d/90-vr-telex.conf")
   check "user's edited environment.d file kept aside" sh -c "[ -n '$saved' ] && grep -qx 'QT_IM_MODULE=user-edit' '$saved'"
   check "kept copy is not a .conf (environment.d ignores it)" sh -c "case '$saved' in *.conf) exit 1;; esac"
   check "warning names the kept environment.d file" grep -qF "$saved" <<<"$out"
-  check "source added after install kept, vr-talex removed" [ "$(gs sources)" = "[('xkb', 'us'), ('xkb', 'fr')]" ]
-  check "mru keeps the user's order without vr-talex" [ "$(gs mru-sources)" = "[('xkb', 'fr'), ('xkb', 'us')]" ]
-  check "backup removed after a complete uninstall" [ ! -e "$XDG_DATA_HOME/vr-talex/backup" ]
+  check "source added after install kept, vr-telex removed" [ "$(gs sources)" = "[('xkb', 'us'), ('xkb', 'fr')]" ]
+  check "mru keeps the user's order without vr-telex" [ "$(gs mru-sources)" = "[('xkb', 'fr'), ('xkb', 'us')]" ]
+  check "backup removed after a complete uninstall" [ ! -e "$XDG_DATA_HOME/vr-telex/backup" ]
 }
 
 t_failed_restore() {
@@ -464,15 +468,15 @@ t_failed_restore() {
   pre_state_fcitx5
   snap "$T8_SANDBOX/pre.snap" noibus
   check "install exits 0" run_install
-  local b="$XDG_DATA_HOME/vr-talex/backup/files/.xinputrc" out rc=0 mode
+  local b="$XDG_DATA_HOME/vr-telex/backup/files/.xinputrc" out rc=0 mode
   mode=$(stat -c %a "$b")
   chmod 000 "$b"
   out=$(run_uninstall 2>&1) || rc=$?
   printf '%s\n' "$out"
   check "uninstall with an unreadable backup file exits non-zero" [ "$rc" -ne 0 ]
   check "~/.xinputrc still exists (not deleted before its replacement)" [ -f "$HOME/.xinputrc" ]
-  check "backup dir kept" [ -d "$XDG_DATA_HOME/vr-talex/backup" ]
-  check "backup manifest kept" [ -f "$XDG_DATA_HOME/vr-talex/backup/manifest" ]
+  check "backup dir kept" [ -d "$XDG_DATA_HOME/vr-telex/backup" ]
+  check "backup manifest kept" [ -f "$XDG_DATA_HOME/vr-telex/backup/manifest" ]
   check "output names the file not restored" grep -q 'not restored:.*\.xinputrc' <<<"$out"
   chmod "$mode" "$b"
   check "second uninstall exits 0" run_uninstall
@@ -532,7 +536,7 @@ t_fcitx5_stuck() {
   local fpid out rc=0
   fpid=$(owner_pid org.fcitx.Fcitx5)
   snap "$T8_SANDBOX/pre.snap"
-  out=$(VR_TALEX_TIMEOUT=2 run_install 2>&1) || rc=$?
+  out=$(VR_TELEX_TIMEOUT=2 run_install 2>&1) || rc=$?
   printf '%s\n' "$out"
   check "install exits non-zero" [ "$rc" -ne 0 ]
   check "says fcitx5 did not quit" grep -q 'did not quit' <<<"$out"
@@ -544,18 +548,18 @@ t_fcitx5_stuck() {
 }
 
 t_reinstall_backup_deleted() {
-  # Review major 3: install must not take vr-talex's own files as the
+  # Review major 3: install must not take vr-telex's own files as the
   # "original" state when the backup is gone.
   pre_state_fcitx5
   check "install exits 0" run_install
-  rm -rf -- "${XDG_DATA_HOME:?}/vr-talex/backup"
+  rm -rf -- "${XDG_DATA_HOME:?}/vr-telex/backup"
   snap "$T8_SANDBOX/mid.snap"
   local out rc=0
   out=$(run_install 2>&1) || rc=$?
   printf '%s\n' "$out"
   check "re-install without backup exits non-zero" [ "$rc" -ne 0 ]
   check "tells the user to run uninstall first" grep -q 'run ./uninstall.sh first' <<<"$out"
-  check "no new backup taken" [ ! -e "$XDG_DATA_HOME/vr-talex/backup" ]
+  check "no new backup taken" [ ! -e "$XDG_DATA_HOME/vr-telex/backup" ]
   snap "$T8_SANDBOX/post.snap"
   check "nothing changed" same_snap "$T8_SANDBOX/mid.snap" "$T8_SANDBOX/post.snap"
 }
@@ -569,16 +573,16 @@ t_special_home() {
   fcitx5 -d
   snap "$T8_SANDBOX/pre.snap" noibus
   check "install exits 0" run_install
-  check "vr-talex owns org.fcitx.Fcitx5" [ "$(owner_pid org.fcitx.Fcitx5)" = "$(systemctl --user show -p MainPID --value vr-talex.service)" ]
-  systemctl --user stop vr-talex.service
+  check "vr-telex owns org.fcitx.Fcitx5" [ "$(owner_pid org.fcitx.Fcitx5)" = "$(systemctl --user show -p MainPID --value vr-telex.service)" ]
+  systemctl --user stop vr-telex.service
   gdbus call --session --dest org.fcitx.Fcitx5 --object-path / \
     --method org.freedesktop.DBus.Peer.Ping 2>&1 || true
   cat "$XDG_DATA_HOME/dbus-1/services/org.fcitx.Fcitx5.service"
   local apid
   apid=$(owner_pid org.fcitx.Fcitx5 || echo 0)
   check "bus activation through the shadow file started a process" [ "$apid" != 0 ]
-  check "activated process is exactly \$HOME/.local/bin/vr-talex" \
-    sh -c "tr '\0' '\n' </proc/$apid/cmdline | grep -qxF \"\$1\"" _ "$HOME/.local/bin/vr-talex"
+  check "activated process is exactly \$HOME/.local/bin/vr-telex" \
+    sh -c "tr '\0' '\n' </proc/$apid/cmdline | grep -qxF \"\$1\"" _ "$HOME/.local/bin/vr-telex"
   if [ "$apid" != 0 ]; then
     kill -TERM "$apid"
     timeout 5 tail --pid="$apid" -f /dev/null || true
@@ -594,7 +598,7 @@ t_rerun_failure() {
   snap "$T8_SANDBOX/pre.snap" noibus
   check "install exits 0" run_install
   local out rc=0
-  out=$(VR_TALEX_BIN="$T8_STUBS/broken-vr-talex" run_install 2>&1) || rc=$?
+  out=$(VR_TELEX_BIN="$T8_STUBS/broken-vr-telex" run_install 2>&1) || rc=$?
   printf '%s\n' "$out"
   check "failed re-run exits non-zero" [ "$rc" -ne 0 ]
   check "says the earlier install was removed" grep -q 'earlier install was removed' <<<"$out"
@@ -615,48 +619,48 @@ t_reselect_on_rerun() {
   out1=$(run_install 2>&1) || rc=$?
   printf '%s\n' "$out1"
   check "install exits 0" [ "$rc" = 0 ]
-  gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'us'), ('ibus', 'vr-talex')]"
+  gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'us'), ('ibus', 'vr-telex')]"
   local main1 calls1
-  main1=$(systemctl --user show -p MainPID --value vr-talex.service)
+  main1=$(systemctl --user show -p MainPID --value vr-telex.service)
   calls1=$(wc -l <"$XDG_RUNTIME_DIR/stub-calls.log")
   out2=$(run_install 2>&1) || rc=$?
   printf '%s\n' "$out2"
   check "second install exits 0" [ "$rc" = 0 ]
   # BASE-48: install cannot read the shell's current source back, so it never claims it is selected.
   check "install never prints 'selected'" sh -c '! printf "%s\n%s\n" "$1" "$2" | grep -qi selected' _ "$out1" "$out2"
-  check "mru-sources has vr-talex first again" [ "$(gs mru-sources)" = "[('ibus', 'vr-talex'), ('xkb', 'us')]" ]
-  check "sources unchanged" [ "$(gs sources)" = "[('xkb', 'us'), ('ibus', 'vr-talex')]" ]
-  check "daemon restarted" [ "$(systemctl --user show -p MainPID --value vr-talex.service)" != "$main1" ]
-  check "restarted with vr-talex first in mru-sources" started_with_vr_head "$calls1"
+  check "mru-sources has vr-telex first again" [ "$(gs mru-sources)" = "[('ibus', 'vr-telex'), ('xkb', 'us')]" ]
+  check "sources unchanged" [ "$(gs sources)" = "[('xkb', 'us'), ('ibus', 'vr-telex')]" ]
+  check "daemon restarted" [ "$(systemctl --user show -p MainPID --value vr-telex.service)" != "$main1" ]
+  check "restarted with vr-telex first in mru-sources" started_with_vr_head "$calls1"
   check "uninstall exits 0" run_uninstall
   snap "$T8_SANDBOX/post.snap" noibus
   check "files restored exactly" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
   check "keyfile restored byte for byte" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
-  expect_no_vr_talex_left
+  expect_no_vr_telex_left
 }
 
 t_reselect_keeps_user_edits() {
   # Review FR-9 minor 1: after install the user adds a layout and uses it; a
-  # re-run puts vr-talex first again, and uninstall still keeps the user's
-  # own change (FR-5 rule: only the vr-talex entry is taken out).
+  # re-run puts vr-telex first again, and uninstall still keeps the user's
+  # own change (FR-5 rule: only the vr-telex entry is taken out).
   pre_state_fcitx5
   gsettings set org.gnome.desktop.wm.keybindings switch-input-source "['<Control>space']"
   check "install exits 0" run_install
   local rec1 out rc=0
-  rec1=$(cat "$XDG_DATA_HOME/vr-talex/backup/installed.gs")
-  gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('ibus', 'vr-talex'), ('xkb', 'de')]"
-  gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'de'), ('ibus', 'vr-talex'), ('xkb', 'us')]"
+  rec1=$(cat "$XDG_DATA_HOME/vr-telex/backup/installed.gs")
+  gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('ibus', 'vr-telex'), ('xkb', 'de')]"
+  gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'de'), ('ibus', 'vr-telex'), ('xkb', 'us')]"
   out=$(run_install 2>&1) || rc=$?
   printf '%s\n' "$out"
   check "second install exits 0" [ "$rc" = 0 ]
-  check "mru-sources: vr-talex first, the user's order kept" [ "$(gs mru-sources)" = "[('ibus', 'vr-talex'), ('xkb', 'de'), ('xkb', 'us')]" ]
-  check "installed.gs not rewritten by the re-run" [ "$(cat "$XDG_DATA_HOME/vr-talex/backup/installed.gs")" = "$rec1" ]
+  check "mru-sources: vr-telex first, the user's order kept" [ "$(gs mru-sources)" = "[('ibus', 'vr-telex'), ('xkb', 'de'), ('xkb', 'us')]" ]
+  check "installed.gs not rewritten by the re-run" [ "$(cat "$XDG_DATA_HOME/vr-telex/backup/installed.gs")" = "$rec1" ]
   check "install names the user's switch shortcut (D33)" grep -qF '<Control>space' <<<"$out"
   check "install does not name Super+Space" sh -c '! printf "%s\n" "$1" | grep -q "Super+Space"' _ "$out"
   check "uninstall exits 0" run_uninstall
   check "sources keep the user's layout" [ "$(gs sources)" = "[('xkb', 'us'), ('xkb', 'de')]" ]
   check "mru-sources keep the user's layout first" [ "$(gs mru-sources)" = "[('xkb', 'de'), ('xkb', 'us')]" ]
-  expect_no_vr_talex_left
+  expect_no_vr_telex_left
 }
 
 t_reselect_rerun_failure() {
@@ -666,9 +670,9 @@ t_reselect_rerun_failure() {
   snap "$T8_SANDBOX/pre.snap" noibus
   cp "$(keyfile)" "$T8_SANDBOX/pre.keyfile"
   check "install exits 0" run_install
-  gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'us'), ('ibus', 'vr-talex')]"
+  gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'us'), ('ibus', 'vr-telex')]"
   local out rc=0
-  out=$(VR_TALEX_BIN="$T8_STUBS/broken-vr-talex" run_install 2>&1) || rc=$?
+  out=$(VR_TELEX_BIN="$T8_STUBS/broken-vr-telex" run_install 2>&1) || rc=$?
   printf '%s\n' "$out"
   check "failed re-run exits non-zero" [ "$rc" -ne 0 ]
   check "says it rolled back" grep -qi 'rolled back' <<<"$out"
@@ -676,7 +680,7 @@ t_reselect_rerun_failure() {
   check "back to the pre-install files" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
   check "keyfile restored byte for byte" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
   check "fcitx5 runs again" has_owner org.fcitx.Fcitx5
-  expect_no_vr_talex_left
+  expect_no_vr_telex_left
 }
 
 t_bad_xdg() {
@@ -723,8 +727,8 @@ t_edited_then_reinstall() {
 
 t_record_write_fails() {
   # Re-check finding: recording what install writes fails (disk full in the
-  # backup dir). The rollback must leave no vr-talex file behind and print
-  # no "was not written by vr-talex" warning. A cp wrapper fails only the
+  # backup dir). The rollback must leave no vr-telex file behind and print
+  # no "was not written by vr-telex" warning. A cp wrapper fails only the
   # copy into backup/installed/ for .xinputrc.
   gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us')]"
   fcitx5 -d
@@ -738,7 +742,7 @@ for a in "$@"; do
   case "$a" in -*) ;; *) src=$dst; dst=$a ;; esac
 done
 case "$dst" in
-  */vr-talex/backup/installed/*)
+  */vr-telex/backup/installed/*)
     if grep -q "run_im none" "$src" 2>/dev/null; then
       echo "cp: error writing $dst: No space left on device" >&2
       exit 1
@@ -754,7 +758,7 @@ EOF
   printf '%s\n' "$out"
   check "install exits non-zero" [ "$rc" -ne 0 ]
   check "rolled back" grep -qi 'rolled back' <<<"$out"
-  check "no wrong \"not written by vr-talex\" warning" sh -c "! printf '%s' \"\$1\" | grep -q 'not written by vr-talex'" _ "$out"
+  check "no wrong \"not written by vr-telex\" warning" sh -c "! printf '%s' \"\$1\" | grep -q 'not written by vr-telex'" _ "$out"
   check "~/.xinputrc not left behind" [ ! -e "$HOME/.xinputrc" ]
   snap "$T8_SANDBOX/post.snap" noibus
   check "everything restored" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
@@ -782,7 +786,7 @@ t_fcitx5_owns_ibus_portal() {
   expect_installed
   check "uninstall exits 0" run_uninstall
   check "fcitx5 runs again" has_owner org.fcitx.Fcitx5
-  expect_no_vr_talex_left
+  expect_no_vr_telex_left
 }
 
 t_ibus_beside_fcitx5_refused() {
@@ -810,7 +814,7 @@ t_unit_restart_policy() {
   # SEC-17 / D22: fast repeated failures (another instance holding the lock,
   # a refused address file, no display yet) must never park the unit in
   # start-limit-hit; it keeps retrying with a back-off instead.
-  local u="$T8_REPO/packaging/vr-talex.service" interval steps maxd sec
+  local u="$T8_REPO/packaging/vr-telex.service" interval steps maxd sec
   interval=$(unit_value "$u" StartLimitIntervalSec)
   steps=$(unit_value "$u" RestartSteps)
   maxd=$(unit_value "$u" RestartMaxDelaySec)
@@ -826,16 +830,16 @@ t_unit_restart_policy() {
   # user's own manager. ExecStart needs an executable at %h/.local/bin.
   if command -v systemd-analyze >/dev/null 2>&1; then
     mkdir -p "$HOME/.local/bin" "$XDG_CONFIG_HOME/systemd/user"
-    install -m 0755 "$T8_STUBS/fake-ime" "$HOME/.local/bin/vr-talex"
-    cp "$u" "$XDG_CONFIG_HOME/systemd/user/vr-talex.service"
+    install -m 0755 "$T8_STUBS/fake-ime" "$HOME/.local/bin/vr-telex"
+    cp "$u" "$XDG_CONFIG_HOME/systemd/user/vr-telex.service"
     local out rc=0
-    out=$(systemd-analyze --user --man=no verify "$XDG_CONFIG_HOME/systemd/user/vr-talex.service" 2>&1) || rc=$?
+    out=$(systemd-analyze --user --man=no verify "$XDG_CONFIG_HOME/systemd/user/vr-telex.service" 2>&1) || rc=$?
     printf 'systemd-analyze --user verify (exit %s):\n%s\n' "$rc" "$out"
     check "systemd-analyze --user verify exits 0" [ "$rc" = 0 ]
     # Only lines about this unit count: system units it pulls in may complain
     # about the long sandbox runtime path.
-    check "systemd-analyze reports nothing about vr-talex.service" \
-      sh -c "! printf '%s\n' \"\$1\" | grep -q 'vr-talex\.service'" _ "$out"
+    check "systemd-analyze reports nothing about vr-telex.service" \
+      sh -c "! printf '%s\n' \"\$1\" | grep -q 'vr-telex\.service'" _ "$out"
   else
     bad "systemd-analyze not found"
   fi
@@ -844,7 +848,7 @@ t_unit_restart_policy() {
 t_uninstall_activation_gap() {
   # Final review: an activation request for org.fcitx.Fcitx5 that arrives
   # right after uninstall stops the unit (a fcitx-route app re-probing the
-  # vanished name) must not start vr-talex again; fcitx5 must come back.
+  # vanished name) must not start vr-telex again; fcitx5 must come back.
   pre_state_fcitx5
   check "install exits 0" run_install
   write_gapstub
@@ -855,20 +859,20 @@ t_uninstall_activation_gap() {
   check "an activation request was sent right after the unit stopped" [ -s "$XDG_RUNTIME_DIR/gap-probe.log" ]
   owner=$(owner_pid org.fcitx.Fcitx5 || echo 0)
   check "org.fcitx.Fcitx5 has an owner" [ "$owner" != 0 ]
-  check "the owner is not vr-talex" sh -c "! tr '\0' '\n' </proc/$owner/cmdline 2>/dev/null | grep -q '/.local/bin/vr-talex'"
+  check "the owner is not vr-telex" sh -c "! tr '\0' '\n' </proc/$owner/cmdline 2>/dev/null | grep -q '/.local/bin/vr-telex'"
   # pre_state_fcitx5 made the first "fcitx5 -d" call; uninstall makes the second.
   check "uninstall started fcitx5 again" [ "$(grep -c "^fcitx5 -d" "$XDG_RUNTIME_DIR/stub-calls.log")" -ge 2 ]
-  check "no vr-talex process left running" no_vr_talex_alive
-  expect_no_vr_talex_left
+  check "no vr-telex process left running" no_vr_telex_alive
+  expect_no_vr_telex_left
 }
 
 t_uninstall_activation_gap_no_backup() {
   # Same gap on the path where the backup was deleted by hand: uninstall
-  # removes only vr-talex's files, and an activation request right after the
-  # unit stops must not start vr-talex again.
+  # removes only vr-telex's files, and an activation request right after the
+  # unit stops must not start vr-telex again.
   pre_state_fcitx5
   check "install exits 0" run_install
-  rm -rf -- "${XDG_DATA_HOME:?}/vr-talex/backup"
+  rm -rf -- "${XDG_DATA_HOME:?}/vr-telex/backup"
   write_gapstub
   local out rc=0 owner
   out=$(PATH="$T8_SANDBOX/gapstub:$PATH" run_uninstall 2>&1) || rc=$?
@@ -877,17 +881,18 @@ t_uninstall_activation_gap_no_backup() {
   check "it took the no-backup path" grep -q 'no backup found' <<<"$out"
   check "an activation request was sent right after the unit stopped" [ -s "$XDG_RUNTIME_DIR/gap-probe.log" ]
   owner=$(owner_pid org.fcitx.Fcitx5 || echo 0)
-  check "org.fcitx.Fcitx5 is not owned by vr-talex" \
-    sh -c "[ '$owner' = 0 ] || ! tr '\0' '\n' </proc/$owner/cmdline 2>/dev/null | grep -q '/.local/bin/vr-talex'"
-  check "no vr-talex process left running" no_vr_talex_alive
+  check "org.fcitx.Fcitx5 is not owned by vr-telex" \
+    sh -c "[ '$owner' = 0 ] || ! tr '\0' '\n' </proc/$owner/cmdline 2>/dev/null | grep -q '/.local/bin/vr-telex'"
+  check "no vr-telex process left running" no_vr_telex_alive
   check "D-Bus shadow removed" [ ! -e "$XDG_DATA_HOME/dbus-1/services/org.fcitx.Fcitx5.service" ]
-  check "binary removed" [ ! -e "$HOME/.local/bin/vr-talex" ]
+  check "binary removed" [ ! -e "$HOME/.local/bin/vr-telex" ]
 }
 
-# True when no fake vr-talex the sandbox started is still alive.
-no_vr_talex_alive() {
-  local f pid
-  for f in "$XDG_RUNTIME_DIR"/stub-pids/vr-talex.*; do
+# True when no fake daemon of role $1 (default vr-telex) the sandbox
+# started is still alive.
+no_vr_telex_alive() {
+  local f pid role=${1:-vr-telex}
+  for f in "$XDG_RUNTIME_DIR"/stub-pids/"$role".*; do
     [ -f "$f" ] || continue
     pid=$(cat "$f")
     if kill -0 "$pid" 2>/dev/null; then
@@ -898,7 +903,7 @@ no_vr_talex_alive() {
   return 0
 }
 
-# A systemctl in front of the stub that, the moment the vr-talex unit has
+# A systemctl in front of the stub that, the moment the vr-telex unit has
 # been stopped, sends a client call that may auto-start org.fcitx.Fcitx5.
 write_gapstub() {
   mkdir -p "$T8_SANDBOX/gapstub"
@@ -908,7 +913,7 @@ write_gapstub() {
 # name, sent the moment the unit has stopped.
 rc=0
 "$T8_STUBS/systemctl" "$@" || rc=$?
-if [ "$*" = "--user disable --now vr-talex.service" ]; then
+if [ "$*" = "--user disable --now vr-telex.service" ]; then
   echo probe >>"$XDG_RUNTIME_DIR/gap-probe.log"
   gdbus call --session --dest org.fcitx.Fcitx5 --object-path / \
     --method org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1 || true
@@ -917,6 +922,372 @@ exit "$rc"
 EOF
   chmod +x "$T8_SANDBOX/gapstub/systemctl"
 }
+
+# --- legacy vr-talex install (D37) -----------------------------------------
+#
+# A vr-talex install is made by the vr-talex installer itself: tests/install/
+# legacy holds a frozen copy of install.sh and packaging/ from de15649, the
+# last commit before the rename. The fake daemon is installed as
+# ~/.local/bin/vr-talex and takes the role "vr-talex" from that name.
+
+legacy_install() {
+  VR_TALEX_BIN="$T8_STUBS/fake-ime" VR_TALEX_TIMEOUT=5 bash "$T8_REPO/tests/install/legacy/install.sh"
+}
+
+legacy_files_gone() {
+  check "vr-talex unit file removed" [ ! -e "$XDG_CONFIG_HOME/systemd/user/vr-talex.service" ]
+  check "vr-talex unit not enabled" sh -c '! systemctl --user is-enabled --quiet vr-talex.service'
+  check "vr-talex unit inactive" sh -c '! systemctl --user is-active --quiet vr-talex.service'
+  if [ "${1:-}" != keepbin ]; then check "~/.local/bin/vr-talex removed" [ ! -e "$HOME/.local/bin/vr-talex" ]; fi
+  check "~/.local/state/vr-talex removed" [ ! -e "$XDG_STATE_HOME/vr-talex" ]
+  check "no vr-talex process left running" no_vr_telex_alive vr-talex
+}
+
+no_migration_leftovers() {
+  check "no migration snapshot left" sh -c "! ls -d '$XDG_DATA_HOME'/.vr-telex-migrate.* 2>/dev/null"
+  check "no migration marker left" [ ! -e "$XDG_DATA_HOME/vr-telex/backup/from-vr-talex" ]
+}
+
+t_legacy_migrate() {
+  # D37: install over a running vr-talex install moves it to vr-telex, and
+  # uninstall afterwards still returns to the setup from before vr-talex.
+  pre_state_fcitx5
+  cp "$HOME/.xinputrc" "$T8_SANDBOX/pre.xinputrc"
+  snap "$T8_SANDBOX/pre.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/pre.keyfile"
+  check "vr-talex installer exits 0" legacy_install
+  check "vr-talex runs" systemctl --user is-active --quiet vr-talex.service
+  check "vr-talex source selected" [ "$(gs mru-sources)" = "[('ibus', 'vr-talex'), ('xkb', 'us')]" ]
+  # The user switched to EN while vr-talex ran.
+  mkdir -p "$XDG_STATE_HOME/vr-talex"
+  printf 'EN\n' >"$XDG_STATE_HOME/vr-talex/mode"
+  local old_pid out rc=0 calls0 calls1
+  old_pid=$(systemctl --user show -p MainPID --value vr-talex.service)
+  calls0=$(wc -l <"$XDG_RUNTIME_DIR/stub-calls.log")
+  out=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install over vr-talex exits 0" [ "$rc" = 0 ]
+  check "says it moved the vr-talex install" grep -q 'moved the vr-talex install to vr-telex' <<<"$out"
+  check "no 'kept the older backup' warning (there was one backup)" sh -c '! printf "%s" "$1" | grep -q "kept the older backup"' _ "$out"
+  check "vr-talex stopped through systemctl" grep -qx 'systemctl --user disable --now vr-talex.service' "$XDG_RUNTIME_DIR/stub-calls.log"
+  check "old daemon ($old_pid) has exited" sh -c "! kill -0 $old_pid 2>/dev/null"
+  legacy_files_gone
+  check "90-vr-talex.conf removed" [ ! -e "$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf" ]
+  check "~/.local/share/vr-talex removed" [ ! -e "$XDG_DATA_HOME/vr-talex" ]
+  check "sources: vr-talex renamed in place" [ "$(gs sources)" = "[('xkb', 'us'), ('ibus', 'vr-telex')]" ]
+  expect_installed
+  check "VI/EN mode carried over" [ "$(cat "$XDG_STATE_HOME/vr-telex/mode" 2>/dev/null)" = EN ]
+  local b="$XDG_DATA_HOME/vr-telex/backup"
+  check "backup manifest names no vr-talex" sh -c "! grep -q vr-talex '$b/manifest'"
+  check "manifest: no vr-telex binary before vr-talex" grep -qxF "file	.local/bin/vr-telex	absent" "$b/manifest"
+  check "manifest: the vr-telex state dir is install's" grep -qxF "dir	.local/share/vr-telex" "$b/manifest"
+  check "pre-vr-talex ~/.xinputrc still in the backup" cmp -s "$T8_SANDBOX/pre.xinputrc" "$b/files/.xinputrc"
+  check "installed.gs names vr-telex" grep -qF "mru-sources	[('ibus', 'vr-telex'), ('xkb', 'us')]" "$b/installed.gs"
+  check "the recorded unit file moved to its new name" [ -f "$b/installed/.config/systemd/user/vr-telex.service" ]
+  no_migration_leftovers
+  check "daemon started only with vr-telex first in mru-sources" started_with_vr_head "$calls0"
+
+  snap "$T8_SANDBOX/inst1.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/inst1.keyfile"
+  calls1=$(wc -l <"$XDG_RUNTIME_DIR/stub-calls.log")
+  rc=0
+  out=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "second install exits 0" [ "$rc" = 0 ]
+  check "second install finds nothing of vr-talex" sh -c '! printf "%s" "$1" | grep -q vr-talex' _ "$out"
+  snap "$T8_SANDBOX/inst2.snap" noibus
+  check "second install changes no file" same_snap "$T8_SANDBOX/inst1.snap" "$T8_SANDBOX/inst2.snap"
+  check "second install leaves the keyfile byte-identical" cmp "$T8_SANDBOX/inst1.keyfile" "$(keyfile)"
+  check "second install did not stop, start or change vr-talex" sh -c "tail -n +$((calls1 + 1)) '$XDG_RUNTIME_DIR/stub-calls.log' | grep -Eq '^systemctl --user (disable|enable|stop|start|restart) .*vr-talex' && exit 1 || exit 0"
+
+  check "uninstall exits 0" run_uninstall
+  snap "$T8_SANDBOX/post.snap" noibus
+  check "files back to the state before vr-talex" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
+  check "keyfile back to the state before vr-talex" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
+  check "fcitx5 started again" has_owner org.fcitx.Fcitx5
+  expect_no_vr_telex_left
+}
+
+t_legacy_rollback() {
+  # The new daemon does not come up: the vr-talex install comes back exactly
+  # and runs again, instead of both being removed (no IME left, D31).
+  pre_state_fcitx5
+  snap "$T8_SANDBOX/pre.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/pre.keyfile"
+  check "vr-talex installer exits 0" legacy_install
+  mkdir -p "$XDG_STATE_HOME/vr-talex"
+  printf 'EN\n' >"$XDG_STATE_HOME/vr-talex/mode"
+  snap "$T8_SANDBOX/legacy.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/legacy.keyfile"
+  local out rc=0 main
+  out=$(VR_TELEX_BIN="$T8_STUBS/broken-vr-telex" run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install with a dying daemon exits non-zero" [ "$rc" -ne 0 ]
+  check "says vr-talex runs again" grep -q 'vr-talex runs again' <<<"$out"
+  check "prints the vr-talex recovery path" grep -q 'systemctl --user disable --now vr-talex.service' <<<"$out"
+  check "the new daemon was started with vr-telex first (there was something to undo)" started_with_vr_head 0
+  snap "$T8_SANDBOX/post.snap" noibus
+  check "every file back to the vr-talex install" same_snap "$T8_SANDBOX/legacy.snap" "$T8_SANDBOX/post.snap"
+  check "input sources back to vr-talex (keyfile byte-identical)" cmp "$T8_SANDBOX/legacy.keyfile" "$(keyfile)"
+  main=$(systemctl --user show -p MainPID --value vr-talex.service)
+  check "vr-talex unit active again" systemctl --user is-active --quiet vr-talex.service
+  check "vr-talex unit enabled again" systemctl --user is-enabled --quiet vr-talex.service
+  check "org.fcitx.Fcitx5 owned by vr-talex ($main)" [ "$(owner_pid org.fcitx.Fcitx5)" = "$main" ]
+  check "IBus address file holds vr-talex's pid" addr_file_pid_is "$main"
+  check "vr-telex unit inactive" sh -c '! systemctl --user is-active --quiet vr-telex.service'
+
+  # Fixed: the next run moves it, and uninstall still reaches the start.
+  check "install with a working daemon exits 0" run_install
+  expect_installed
+  legacy_files_gone
+  check "uninstall exits 0" run_uninstall
+  snap "$T8_SANDBOX/end.snap" noibus
+  check "files back to the state before vr-talex" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/end.snap"
+  check "keyfile back to the state before vr-talex" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
+}
+
+# A vr-telex backup made from the vr-talex one, with the saved sources
+# changed so the tests can tell which backup uninstall used.
+make_telex_backup() {
+  local b="$XDG_DATA_HOME/vr-telex/backup"
+  cp -a "$XDG_DATA_HOME/vr-talex" "$XDG_DATA_HOME/vr-telex"
+  perl -pi -e 's/vr-talex/vr-telex/g' "$b/manifest" "$b/installed.gs"
+  perl -pi -e "s/^gs\tsources\t.*/gs\tsources\t[('xkb', 'us'), ('xkb', 'fr')]/" "$b/manifest"
+  mv "$b/installed/.local/bin/vr-talex" "$b/installed/.local/bin/vr-telex"
+  mv "$b/installed/.config/systemd/user/vr-talex.service" "$b/installed/.config/systemd/user/vr-telex.service"
+  mv "$b/installed/.config/environment.d/90-vr-talex.conf" "$b/installed/.config/environment.d/90-vr-telex.conf"
+}
+
+legacy_backup_sum() { (cd "$XDG_DATA_HOME/vr-talex" && find . -printf '%y %m %p\n' | LC_ALL=C sort && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum); }
+
+t_legacy_both_dirs() {
+  # Both backups exist: the vr-telex one is used, the vr-talex one is left
+  # untouched and reported; the rest of vr-talex is still moved.
+  pre_state_fcitx5
+  check "vr-talex installer exits 0" legacy_install
+  make_telex_backup
+  legacy_backup_sum >"$T8_SANDBOX/legacy.sum"
+  local out rc=0
+  out=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install exits 0" [ "$rc" = 0 ]
+  check "warns that the older backup is kept" grep -q 'kept the older backup' <<<"$out"
+  check "vr-talex backup untouched" sh -c "legacy_sum=\$(cat '$T8_SANDBOX/legacy.sum'); [ \"\$legacy_sum\" = \"\$1\" ]" _ "$(legacy_backup_sum)"
+  legacy_files_gone
+  check "sources: vr-talex renamed in place" [ "$(gs sources)" = "[('xkb', 'us'), ('ibus', 'vr-telex')]" ]
+  expect_installed
+  no_migration_leftovers
+  snap "$T8_SANDBOX/inst1.snap" noibus
+  rc=0
+  out=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "second install exits 0" [ "$rc" = 0 ]
+  snap "$T8_SANDBOX/inst2.snap" noibus
+  check "second install changes no file" same_snap "$T8_SANDBOX/inst1.snap" "$T8_SANDBOX/inst2.snap"
+  rc=0
+  out=$(run_uninstall 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "uninstall exits 0" [ "$rc" = 0 ]
+  check "uninstall used the vr-telex backup" [ "$(gs sources)" = "[('xkb', 'us'), ('xkb', 'fr')]" ]
+  check "vr-talex backup still untouched" sh -c "legacy_sum=\$(cat '$T8_SANDBOX/legacy.sum'); [ \"\$legacy_sum\" = \"\$1\" ]" _ "$(legacy_backup_sum)"
+  check "uninstall says the older backup is kept" grep -q 'kept the older backup' <<<"$out"
+}
+
+t_legacy_foreign_file() {
+  # A file at a vr-talex path that is not what vr-talex installed (here the
+  # user edited its environment file) is never deleted (SEC-24).
+  pre_state_fcitx5
+  check "vr-talex installer exits 0" legacy_install
+  local env="$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf" out rc=0
+  printf 'MY_VAR=1\n' >"$env"
+  out=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install exits 0" [ "$rc" = 0 ]
+  check "the edited 90-vr-talex.conf is left in place" grep -qx 'MY_VAR=1' "$env"
+  check "the warning names it" grep -qF "$env is not the file vr-talex installed" <<<"$out"
+  legacy_files_gone
+  expect_installed
+  snap "$T8_SANDBOX/inst1.snap" noibus
+  check "second install exits 0" run_install
+  snap "$T8_SANDBOX/inst2.snap" noibus
+  check "second install changes no file" same_snap "$T8_SANDBOX/inst1.snap" "$T8_SANDBOX/inst2.snap"
+  check "uninstall exits 0" run_uninstall
+  check "the edited 90-vr-talex.conf survives uninstall" grep -qx 'MY_VAR=1' "$env"
+}
+
+t_foreign_legacy_name_only() {
+  # No vr-talex install, only a file of the user's under that name (a
+  # wrapper that even names vr-talex): not taken for an install, never
+  # deleted, by uninstall or install (SEC-21, SEC-24).
+  gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us')]"
+  mkdir -p "$HOME/.local/bin"
+  printf '#!/bin/sh\nexec "$HOME/src/vr-talex/target/release/vr-talex" "$@"\n' >"$HOME/.local/bin/vr-talex"
+  chmod 0755 "$HOME/.local/bin/vr-talex"
+  cp -p "$HOME/.local/bin/vr-talex" "$T8_SANDBOX/mine"
+  local out rc=0
+  out=$(run_uninstall 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "uninstall before any install exits 0" [ "$rc" = 0 ]
+  check "uninstall says nothing is installed" grep -q 'not installed' <<<"$out"
+  check "uninstall left the user's wrapper untouched" same_entry_t "$T8_SANDBOX/mine" "$HOME/.local/bin/vr-talex"
+  rc=0
+  out=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install exits 0" [ "$rc" = 0 ]
+  check "no migration attempted" sh -c '! printf "%s" "$1" | grep -q "old name"' _ "$out"
+  check "the user's ~/.local/bin/vr-talex is untouched" same_entry_t "$T8_SANDBOX/mine" "$HOME/.local/bin/vr-talex"
+  expect_installed
+  check "uninstall exits 0" run_uninstall
+  check "the user's ~/.local/bin/vr-talex survives uninstall" same_entry_t "$T8_SANDBOX/mine" "$HOME/.local/bin/vr-talex"
+}
+
+same_entry_t() { cmp -s "$1" "$2" && [ "$(stat -c %a "$1")" = "$(stat -c %a "$2")" ]; }
+
+t_uninstall_legacy() {
+  # The new uninstall.sh run on a vr-talex install (install.sh never ran)
+  # restores the setup vr-talex saved and removes vr-talex.
+  pre_state_fcitx5
+  snap "$T8_SANDBOX/pre.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/pre.keyfile"
+  check "vr-talex installer exits 0" legacy_install
+  mkdir -p "$XDG_STATE_HOME/vr-talex"
+  printf 'EN\n' >"$XDG_STATE_HOME/vr-talex/mode"
+  local out rc=0
+  out=$(run_uninstall 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "uninstall exits 0" [ "$rc" = 0 ]
+  check "says it found vr-talex" grep -q 'old name vr-talex' <<<"$out"
+  legacy_files_gone
+  snap "$T8_SANDBOX/post.snap" noibus
+  check "files back to the state before vr-talex" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
+  check "keyfile back to the state before vr-talex" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
+  check "fcitx5 started again" has_owner org.fcitx.Fcitx5
+  expect_no_vr_telex_left
+}
+
+t_legacy_without_backup() {
+  # vr-talex with its backup deleted by hand: install refuses before any
+  # change; uninstall removes only vr-talex's own files and its source.
+  pre_state_fcitx5
+  check "vr-talex installer exits 0" legacy_install
+  rm -rf -- "${XDG_DATA_HOME:?}/vr-talex"
+  snap "$T8_SANDBOX/mid.snap"
+  local out rc=0
+  out=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install exits non-zero" [ "$rc" -ne 0 ]
+  check "tells the user to run uninstall first" grep -q 'run ./uninstall.sh first' <<<"$out"
+  snap "$T8_SANDBOX/post.snap"
+  check "nothing changed" same_snap "$T8_SANDBOX/mid.snap" "$T8_SANDBOX/post.snap"
+  check "vr-talex still runs" systemctl --user is-active --quiet vr-talex.service
+  rc=0
+  out=$(run_uninstall 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "uninstall exits 0" [ "$rc" = 0 ]
+  legacy_files_gone keepbin
+  # Without vr-talex's record the binary cannot be told from a file of the
+  # user's, so it is left and named (SEC-21).
+  check "unrecorded ~/.local/bin/vr-talex left in place" [ -f "$HOME/.local/bin/vr-talex" ]
+  check "the warning names it" grep -qF "$HOME/.local/bin/vr-talex cannot be told apart" <<<"$out"
+  rm -f -- "$HOME/.local/bin/vr-talex"
+  check "90-vr-talex.conf removed" [ ! -e "$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf" ]
+  check "D-Bus shadow vr-talex wrote removed" [ ! -e "$XDG_DATA_HOME/dbus-1/services/org.fcitx.Fcitx5.service" ]
+  check "autostart override vr-talex wrote removed" [ ! -e "$XDG_CONFIG_HOME/autostart/org.fcitx.Fcitx5.desktop" ]
+  check "~/.xinputrc vr-talex wrote removed" [ ! -e "$HOME/.xinputrc" ]
+  check "vr-talex source dropped from sources" [ "$(gs sources)" = "[('xkb', 'us')]" ]
+  check "vr-talex source dropped from mru-sources" [ "$(gs mru-sources)" = "[('xkb', 'us')]" ]
+  expect_no_vr_telex_left
+}
+
+
+t_legacy_source_only() {
+  # Only a dead vr-talex entry is left in the input sources (an old uninstall
+  # without a backup kept it): install drops it before taking the backup, so
+  # uninstall does not bring it back either.
+  gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('ibus', 'vr-talex')]"
+  gsettings set org.gnome.desktop.input-sources mru-sources "[('ibus', 'vr-talex'), ('xkb', 'us')]"
+  local out rc=0
+  out=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install exits 0" [ "$rc" = 0 ]
+  check "the vr-talex entry is gone, vr-telex added once" [ "$(gs sources)" = "[('xkb', 'us'), ('ibus', 'vr-telex')]" ]
+  check "backup holds the sources without the dead entry" grep -qxF "gs	sources	[('xkb', 'us')]" "$XDG_DATA_HOME/vr-telex/backup/manifest"
+  expect_installed
+  check "uninstall exits 0" run_uninstall
+  check "sources after uninstall" [ "$(gs sources)" = "[('xkb', 'us')]" ]
+  check "mru-sources after uninstall" [ "$(gs mru-sources)" = "[('xkb', 'us')]" ]
+  expect_no_vr_telex_left
+}
+
+
+t_legacy_rollback_restore_fails() {
+  # The rollback to vr-talex cannot put a file back (a
+  # cp that fails for copies out of the snapshot): the snapshot is kept and
+  # its path printed, never deleted.
+  pre_state_fcitx5
+  check "vr-talex installer exits 0" legacy_install
+  mkdir -p "$T8_SANDBOX/cpstub"
+  cat >"$T8_SANDBOX/cpstub/cp" <<'EOS'
+#!/bin/sh
+for a in "$@"; do
+  case "$a" in -*) ;; *) src=$a; break ;; esac
+done
+case "$src" in
+  */.vr-telex-migrate.*) echo "cp: cannot read $src: Input/output error" >&2; exit 1 ;;
+esac
+exec /usr/bin/cp "$@"
+EOS
+  chmod +x "$T8_SANDBOX/cpstub/cp"
+  local out rc=0 kept
+  out=$(PATH="$T8_SANDBOX/cpstub:$PATH" VR_TELEX_BIN="$T8_STUBS/broken-vr-telex" run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install exits non-zero" [ "$rc" -ne 0 ]
+  check "says the rollback is incomplete" grep -q 'rollback is incomplete' <<<"$out"
+  kept=$(sed -n 's/.*kept in \(.*\.vr-telex-migrate\.[A-Za-z0-9]*\).*/\1/p' <<<"$out" | head -n 1)
+  check "names the kept snapshot" [ -n "$kept" ]
+  check "the snapshot is still there, with its saved files" sh -c "[ -f '$kept/list' ] && [ -f '$kept/files/.xinputrc' ]"
+}
+
+t_legacy_backup_rm_fails() {
+  # The old backup cannot be removed after a healthy
+  # start: a warning, and install still succeeds.
+  pre_state_fcitx5
+  check "vr-talex installer exits 0" legacy_install
+  mkdir -p "$T8_SANDBOX/rmstub"
+  cat >"$T8_SANDBOX/rmstub/rm" <<'EOS'
+#!/bin/sh
+for a in "$@"; do
+  case "$a" in */vr-talex/backup) echo "rm: cannot remove '$a': Permission denied" >&2; exit 1 ;; esac
+done
+exec /usr/bin/rm "$@"
+EOS
+  chmod +x "$T8_SANDBOX/rmstub/rm"
+  local out rc=0
+  out=$(PATH="$T8_SANDBOX/rmstub:$PATH" run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install exits 0" [ "$rc" = 0 ]
+  check "warns that the older backup could not be removed" grep -q 'could not remove the older backup' <<<"$out"
+  check "the rest of the cleanup ran (vr-talex source renamed, unit file gone)" \
+    sh -c "[ ! -e '$XDG_CONFIG_HOME/systemd/user/vr-talex.service' ]"
+  expect_installed
+}
+
+t_legacy_rollback_default_key() {
+  # A key at its default before the run (the user reset
+  # mru-sources) is unset again after the rollback, not written.
+  pre_state_fcitx5
+  check "vr-talex installer exits 0" legacy_install
+  gsettings reset org.gnome.desktop.input-sources mru-sources
+  cp "$(keyfile)" "$T8_SANDBOX/legacy.keyfile"
+  local out rc=0
+  out=$(VR_TELEX_BIN="$T8_STUBS/broken-vr-telex" run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install exits non-zero" [ "$rc" -ne 0 ]
+  check "rolled back to vr-talex" grep -q 'vr-talex runs again' <<<"$out"
+  check "mru-sources not set in the keyfile" sh -c "! grep -q '^mru-sources=' '$(keyfile)'"
+  check "keyfile byte-identical to before the run" cmp "$T8_SANDBOX/legacy.keyfile" "$(keyfile)"
+}
+
 
 in_sandbox() {
   local name=$1

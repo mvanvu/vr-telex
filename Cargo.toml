@@ -6,7 +6,7 @@ members = [
     "crates/fe-ibus",
     "crates/fe-fcitx",
     "crates/fe-xim",
-    "crates/vr-talex",
+    "crates/vr-telex",
 ]
 
 [workspace.package]
