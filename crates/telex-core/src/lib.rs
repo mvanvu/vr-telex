@@ -88,7 +88,7 @@ enum Mode {
 enum Step {
     Ok,
     /// Undo by repeat: render the word as it is now, then append this key literally.
-    Literal(char),
+    Literal(char, Option<usize>),
     /// No syllable fits: restore the raw keys.
     Invalid,
 }
@@ -102,6 +102,12 @@ pub struct Composer {
     text: String,
     /// The last key only changed the tone: BackSpace then takes the tone back
     /// instead of the last letter (`vieets` + BackSpace → viêt).
+    /// Letter count when the tone key / the last `w` key was typed: an undo puts
+    /// the literal key back there (`lists` → `list`), not at the end.
+    tone_at: usize,
+    horn_at: Option<usize>,
+    /// The undone key sits inside the text, so `raw` no longer ends like it.
+    undo_inserted: bool,
     tone_key_last: bool,
 }
 
@@ -130,6 +136,9 @@ impl Composer {
             mode: Mode::Viet,
             text: String::new(),
             tone_key_last: false,
+            tone_at: 0,
+            horn_at: None,
+            undo_inserted: false,
         }
     }
 
@@ -161,9 +170,18 @@ impl Composer {
                 self.render();
                 Outcome::Composing
             }
-            Step::Literal(key) => {
+            Step::Literal(key, at) => {
                 self.render();
-                self.text.push(key);
+                match at.and_then(|p| self.text.char_indices().nth(p)) {
+                    Some((i, _)) => {
+                        self.text.insert(i, key);
+                        self.undo_inserted = true;
+                    }
+                    None => {
+                        self.text.push(key);
+                        self.undo_inserted = false;
+                    }
+                }
                 self.enter_passthrough(Mode::Undone);
                 Outcome::Invalid
             }
@@ -199,6 +217,10 @@ impl Composer {
                 if before == self.text {
                     self.mode = Mode::Viet;
                     self.resync_raw();
+                }
+                if self.mode == Mode::Undone && self.undo_inserted {
+                    wipe_string(&mut self.raw);
+                    self.raw.push_str(&self.text);
                 }
                 wipe_string(&mut before);
             }
@@ -287,6 +309,9 @@ impl Composer {
             self.raw
                 .push(if upper { k.to_ascii_uppercase() } else { k });
         }
+        self.tone_at = self.letters.len();
+        self.horn_at = None;
+        self.undo_inserted = false;
         self.tone_key_last = false;
     }
 
@@ -321,6 +346,9 @@ impl Composer {
         self.tone = Tone::None;
         self.mode = Mode::Viet;
         self.tone_key_last = false;
+        self.tone_at = 0;
+        self.horn_at = None;
+        self.undo_inserted = false;
     }
 
     fn restore_raw(&mut self) {
@@ -350,9 +378,10 @@ impl Composer {
             if let Some(t) = Tone::from_key(k) {
                 if self.tone == t {
                     self.tone = Tone::None;
-                    return Step::Literal(ch);
+                    return Step::Literal(ch, Some(self.tone_at));
                 }
                 self.tone = t;
+                self.tone_at = self.letters.len();
                 self.tone_key_last = true;
                 return self.validated();
             }
@@ -365,7 +394,14 @@ impl Composer {
 
         match (k, syl) {
             ('a' | 'e' | 'o', Some(s)) if has_nucleus => return self.circumflex(k, ch, s),
-            ('w', Some(s)) => return self.horn(ch, s),
+            ('w', Some(s)) => {
+                let at = self.letters.len();
+                let step = self.horn(ch, s);
+                if matches!(step, Step::Ok) {
+                    self.horn_at = Some(at);
+                }
+                return step;
+            }
             ('d', _) if self.letters.len() == 1 => match self.letters[0].ch {
                 'd' => {
                     self.letters[0].ch = 'đ';
@@ -373,7 +409,7 @@ impl Composer {
                 }
                 'đ' => {
                     self.letters[0].ch = 'd';
-                    return Step::Literal(ch);
+                    return Step::Literal(ch, None);
                 }
                 _ => {}
             },
@@ -412,7 +448,7 @@ impl Composer {
         }
         if let Some(i) = (s.ns..s.ne).rev().find(|&i| self.letters[i].ch == hat) {
             self.letters[i].ch = k;
-            return Step::Literal(ch);
+            return Step::Literal(ch, None);
         }
         self.letters.push(Letter::new(k, ch.is_ascii_uppercase()));
         self.validated()
@@ -457,6 +493,11 @@ impl Composer {
 
         // Undo: drop every w mark of the nucleus, then the key itself is literal.
         if nuc.iter().any(|&c| matches!(c, 'ă' | 'ơ' | 'ư')) {
+            let at = if self.letters[s.ns..s.ne].iter().any(|l| l.w_alone) {
+                None
+            } else {
+                self.horn_at.filter(|&p| p <= end)
+            };
             for i in (s.ns..s.ne).rev() {
                 let l = &mut self.letters[i];
                 match l.ch {
@@ -473,7 +514,7 @@ impl Composer {
                     _ => {}
                 }
             }
-            return Step::Literal(ch);
+            return Step::Literal(ch, at);
         }
 
         // A lone `w` is ư where a vowel can start (`tw`, `giw`).

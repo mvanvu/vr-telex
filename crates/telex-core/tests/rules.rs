@@ -371,3 +371,39 @@ fn backspace_state_stays_consistent() {
         ("aa<aa", "â"),
     ]);
 }
+
+#[test]
+fn undo_tone_after_later_letters_restores_typed_order() {
+    check(&[
+        // Reporter's keys: the repeated tone key undoes the tone, key typed once.
+        ("lists", "list"),
+        ("listfs", "listfs"),
+        ("tetss", "tets"),
+        ("tets", "tét"),
+        ("hocjj", "hocj"),
+        ("toanxx", "toanx"),
+        ("toanff", "toanf"),
+        ("vieetss", "viêts"),
+        ("ass", "as"),
+        ("bass", "bas"),
+        ("LISTS", "LIST"),
+    ]);
+}
+
+#[test]
+fn undo_w_after_later_letters_restores_typed_order() {
+    check(&[("chuwngw", "chuwng"), ("tuwrw", "tủw"), ("aww", "aw")]);
+}
+
+#[test]
+fn backspace_after_mid_word_undo_follows_shown_text() {
+    let mut c = Composer::new();
+    for ch in "lists".chars() {
+        c.push(ch);
+    }
+    assert_eq!(c.text(), "list");
+    c.pop();
+    assert_eq!(c.text(), "lis");
+    c.push('a');
+    assert_eq!(c.text(), "lisa");
+}
