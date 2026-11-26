@@ -18,7 +18,7 @@ max_verifiers: 4
 tooling_policy: keep-existing
 ---
 
-# Project profile — vr-talex
+# Project profile — vr-telex
 
 Standalone Vietnamese Telex input method daemon for Ubuntu 24.04+ GNOME. See `.ai-dev-team/workspace/01_spec.md`.
 

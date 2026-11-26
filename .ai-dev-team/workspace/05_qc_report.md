@@ -241,3 +241,28 @@ Artifacts: .ai-dev-team/workspace/qa-artifacts/SIGNOFF/. fcitx5 pid 6881 unchang
 | code-term 15 ms x1 | lost 82 (expected small losses) | e2e-codeterm15 |
 | fcitx route term 1000 words 15 ms | pass 5598/5598, 0 lost | e2e-fcitx |
 Unverified here: O1 real desktop, SEC-23 shellcheck, SEC-25/26 cargo-audit/deny.
+
+## QC FR-13
+Ran on: worktree /home/rainy/DEV/vr-telex-wt-FR13, branch fr13-rename (HEAD de15649, uncommitted, nothing staged; untouched by QC). Engines: bash e2e harness (isolated headless nested GNOME Shell 46, private dbus-run-session, temp HOME, dconf in sandbox, systemctl shim, kill-by-name refused), gnome-terminal, real daemons (legacy built from de15649 in a throwaway worktree, new built from the FR-13 tree, both `cargo build --release --offline` via run-heavy.sh). fcitx5 is not installed here, so the "fcitx5 back" restore is not checked. The scenario runs on a copy of the tree (qa-artifacts/FR-13/view) with its own install_scenario.sh; no repo file changed.
+
+| # | Criterion | Result | Evidence |
+|---|---|---|---|
+| 1 | D37 grep: `git grep -il talex` outside .ai-dev-team | pass | 6 files: README.md (8 hits, "Upgrading from vr-talex" section), install.sh (21, migration), packaging/common.sh (27, legacy section), uninstall.sh (5, legacy removal), tests/install/run.sh (100, legacy scenarios), tests/install/stubs/fake-ime (4, legacy role). Untracked tests/install/legacy/ is the frozen de15649 installer. No stray name elsewhere. |
+| 2 | Migration end to end, real daemons | pass | results/out/results.txt, results/logs/new-install-A.log. Legacy install (frozen installer + de15649 binary): unit active, shell on ibus:vr-talex, `vieetj` -> việt. New install.sh: rc 0, vr-telex.service active+enabled, old pid gone, vr-talex unit/bin/env/share/state all gone, sources `[('xkb','us'),('ibus','vr-telex')]`, mru `[('ibus','vr-telex'),('xkb','us')]`, running shell current = ibus:vr-telex, indicator VI, new gnome-terminal `vieetj` -> việt, backup at ~/.local/share/vr-telex/backup with manifest rewritten (results/out/new-manifest.txt, no "talex" string anywhere in backup, no talex-named path in HOME). Second install: rc 0, file+sources hash identical, gsettings identical, daemon active, typing still việt. uninstall.sh: rc 0, sources back to `[('xkb','us')]`, nothing vr-telex/vr-talex-named left in HOME. |
+| 3a | Broken new daemon -> back on vr-talex | pass | new-install-F.log: rc 1, "rolled back: vr-talex runs again as before". vr-talex unit active+enabled, sources `[('xkb','us'),('ibus','vr-talex')]`, backup sha256 list identical (backup-before/after-fail.sha), no vr-telex dir/bin/unit left, gsettings identical, typing in terminal still việt. Footprint diff = only ~/.local/share/nautilus/tags/meta.db-shm/-wal (created by the shell session, not the installer; fp-before/after-fail.txt). |
+| 3b | Foreign file at legacy path | pass | ~/.local/bin/vr-talex replaced by a user script before the new install: sha256 unchanged after install and after uninstall, warning "is not the file vr-talex installed; left in place" (foreign-warning.txt), rest migrated (vr-telex active, vr-talex unit gone, sources renamed), uninstall restores sources. |
+
+Harness notes (not defects): the first run printed FAIL on AC-migrate/AC-reinstall only because my checker grepped the word "talex" in sandbox paths and logs that contain the repo directory name /home/rainy/DEV/vr-talex; rerun from /tmp/fr13qc (no such name in the sandbox path) passed. The AC-reinstall "log mentions talex" flag in the final run is the same cause (the prebuilt-binary path line); the log has no other talex text. SEC-1 FAIL in the rerun came from the harness scanning its own corpus files (tokens.txt, expected.txt, corpus.json) in the out dir; the first run's SEC-1 was PASS (0 hits). AC-10 INCOMPLETE is by design (D24). Cleanup: throwaway worktree removed, target dirs and /tmp/fr13qc removed, sandbox processes stopped by the harness (20 tagged); real HOME, gsettings and systemd were not touched.
+Artifacts: /home/rainy/DEV/vr-talex/.ai-dev-team/workspace/qa-artifacts/FR-13/ (view/tests/e2e/install_scenario.sh = scenario, build.sh, e2e-run.log, results/).
+
+## Rule check FR-13
+| Rule | Result | Evidence |
+|---|---|---|
+| AC-5 | pass | install migrates and Vietnamese works (row 2); re-run no change |
+| AC-6 | pass | uninstall restores pre-vr-talex sources, removes everything |
+| D37 | pass | rows 1-3 |
+| SEC-19 | pass | row 3a: unhealthy daemon -> rolled back, sources/typing intact; row 2: sources written before the daemon start, shell selects vr-telex |
+| SEC-21 | pass | backup moved and rewritten, restored exactly by uninstall; second run does not touch it |
+| SEC-22 | pass | single vr-telex entry after migration and re-run, no duplicate, files unchanged on re-run |
+| SEC-24 | pass | `grep -nE 'curl|wget|\| *(ba)?sh'` on install.sh, common.sh, uninstall.sh: none; foreign legacy file never deleted (3b) |
+| BASE-17/30 | pass | all probe data in a sandbox HOME, removed; no commit to the live stack |
