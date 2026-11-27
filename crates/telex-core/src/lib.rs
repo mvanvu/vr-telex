@@ -334,6 +334,11 @@ impl Composer {
         let mut keys = self.raw.chars().rev().skip(1);
         let undone = keys.next().map(|k| k.to_ascii_lowercase());
         let k = ch.to_ascii_lowercase();
+        // A mark undo (`ww`, `aaa`, `ddd`) always goes on from the shown text.
+        // Repeating the same key restores the raw keys (`www`, `aaaa`).
+        if matches!(undone, Some('a' | 'e' | 'o' | 'd' | 'w')) {
+            return Some(k) == undone;
+        }
         // `l` / `r` form the clusters of `offline`, `offroad`.
         is_raw_vowel_key(ch) || matches!(k, 'l' | 'r') || Some(k) == undone
     }
@@ -480,11 +485,16 @@ impl Composer {
 
         // Undo: drop every w mark of the nucleus, then the key itself is literal.
         if nuc.iter().any(|&c| matches!(c, 'ă' | 'ơ' | 'ư')) {
+            let mut literal = ch;
             for i in (s.ns..s.ne).rev() {
                 let l = &mut self.letters[i];
                 match l.ch {
                     'ư' if l.w_alone => {
                         if i + 1 == end {
+                            // The shown `w` keeps the case of the key it came from.
+                            if l.upper {
+                                literal = ch.to_ascii_uppercase();
+                            }
                             self.letters.remove(i);
                         } else {
                             l.ch = 'w';
@@ -496,7 +506,7 @@ impl Composer {
                     _ => {}
                 }
             }
-            return Step::Literal(ch);
+            return Step::Literal(literal);
         }
 
         // A lone `w` is ư where a vowel can start (`tw`, `giw`).

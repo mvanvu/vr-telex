@@ -209,6 +209,31 @@ fn consonant_after_undo_continues_the_shown_text() {
 }
 
 #[test]
+fn letters_after_a_mark_undo_continue_the_shown_text() {
+    check(&[
+        ("ww", "w"),
+        ("wwa", "wa"),
+        ("wwe", "we"),
+        ("www", "www"),
+        ("WWW", "WWW"),
+        ("aaaa", "aaaa"),
+        ("dddd", "dddd"),
+        ("WWa", "Wa"),
+        ("tuwswa", "túwa"),
+        ("ddda", "dda"),
+        ("aaai", "aai"),
+        ("eeea", "eea"),
+        ("oooa", "ooa"),
+        ("uwwa", "uwa"),
+        ("twwa", "twa"),
+        ("Wwa", "Wa"),
+        ("xooong", "xoong"),
+        ("dddt", "ddt"),
+        ("towwn", "town"),
+    ]);
+}
+
+#[test]
 fn adjacent_doubling_only() {
     check(&[
         ("reset", "reset"),
@@ -336,6 +361,10 @@ fn backspace_after_undo_removes_last_shown_char() {
         ("ass<", "a"),
         ("aaa<", "a"),
         ("ddd<", "d"),
+        ("wwa<", "w"),
+        ("ddda<", "dd"),
+        ("ddd<d", "đ"),
+        ("www<", "ww"),
         ("ww<", ""),
         ("uww<", "u"),
         ("booss<", "bô"),
