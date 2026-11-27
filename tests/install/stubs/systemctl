@@ -26,6 +26,19 @@ cmd=${args[0]:-}
 unit=${args[1]:-}
 unitdir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 wants="$unitdir/graphical-session.target.wants"
+# The packaged unit (vr-telex-setup) lives in a system dir; the user dir wins
+# over it, as in systemd's unit search path.
+sysdir=${VR_TELEX_SYSTEM_UNIT_DIR:-}
+
+unit_file() {
+  if [ -f "$unitdir/$1" ]; then
+    printf '%s\n' "$unitdir/$1"
+  elif [ -n "$sysdir" ] && [ -f "$sysdir/$1" ]; then
+    printf '%s\n' "$sysdir/$1"
+  else
+    return 1
+  fi
+}
 
 main_pid() {
   local f="$st/$1.pid" pid
@@ -38,8 +51,7 @@ main_pid() {
 start_unit() {
   local u=$1 file exec pid
   main_pid "$u" >/dev/null && return 0
-  file="$unitdir/$u"
-  [ -f "$file" ] || { echo "Failed to start $u: Unit $u not found." >&2; return 5; }
+  file=$(unit_file "$u") || { echo "Failed to start $u: Unit $u not found." >&2; return 5; }
   exec=$(sed -n 's/^ExecStart=//p' "$file")
   exec=${exec//%h/"$HOME"}
   # The unit quotes the path; this stub runs a single word.
@@ -77,10 +89,10 @@ case "$cmd" in
   restart) stop_unit "$unit"; start_unit "$unit" ;;
   try-restart) if main_pid "$unit" >/dev/null; then stop_unit "$unit"; start_unit "$unit"; fi ;;
   enable)
-    [ -f "$unitdir/$unit" ] || { echo "Failed to enable unit: Unit file $unit does not exist." >&2; exit 1; }
+    file=$(unit_file "$unit") || { echo "Failed to enable unit: Unit file $unit does not exist." >&2; exit 1; }
     if [ ! -L "$wants/$unit" ]; then
       mkdir -p "$wants"
-      ln -s "$unitdir/$unit" "$wants/$unit"
+      ln -s "$file" "$wants/$unit"
     fi
     if [ "$now" = 1 ]; then start_unit "$unit"; fi
     ;;
@@ -101,7 +113,7 @@ case "$cmd" in
       [ "$quiet" = 1 ] || echo enabled
       exit 0
     fi
-    if [ -f "$unitdir/$unit" ]; then
+    if unit_file "$unit" >/dev/null; then
       [ "$quiet" = 1 ] || echo disabled
     else
       [ "$quiet" = 1 ] || echo not-found

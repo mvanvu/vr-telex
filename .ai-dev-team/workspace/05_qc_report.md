@@ -63,3 +63,31 @@ HEAD a31e480 + uncommitted A4 files (tools/apt-repo/build.sh, tests/apt/run.sh, 
 | No install / no sudo / no code edits | respected |
 
 QC_PASS A4
+
+## QC A2 (HEAD bb58148 + uncommitted A2 files: install.sh, uninstall.sh, packaging/common.sh, packaging/vr-telex-setup, tests/install/**)
+Engines: shell sandboxes only (stub systemctl/fake-ime), no browser needed. Nothing installed or run on the real session.
+- tests/install/run.sh (run-heavy): 55 scenarios, 0 failed (qa-artifacts/A2/qc_install.log)
+- VR_TELEX_DEB_STRICT=1 tests/deb/run.sh: plain PASS, 0 fail/skip lines (qa-artifacts/A2/qc_deb.log)
+- tests/apt/run.sh with real package (cargo deb -p vr-telex -o qa-artifacts/A2/deb/vr-telex_0.1.0-1_amd64.deb; target/debian does not exist, the deb test builds in a temp dir): plain PASS (qa-artifacts/A2/qc_apt.log). Closes A4's unverified item.
+- I read setup_fresh and setup_legacy_keep_selection logs myself (qa-artifacts/A2/sc/).
+
+| Criterion | Scenario / evidence | Result |
+|---|---|---|
+| AC-3 setup / --remove | setup_fresh (setup, rerun idempotent, --remove restores files and keyfile byte for byte, second --remove ok), setup_remove_without_backup | ok |
+| AC-3 /usr/bin/vr-telex used | setup_fresh "the daemon is the packaged binary", D-Bus shadow execs packaged binary; setup_no_package "default binary is /usr/bin/vr-telex" | ok |
+| AC-3 packaged unit | "enabled through the packaged unit", "no unit file of its own in ~/.config/systemd/user", setup_unit_override | ok |
+| AC-3 no cargo build | "never ran cargo" | ok |
+| AC-3 nothing in ~/.local/bin | "nothing in ~/.local/bin" | ok |
+| AC-3 root refused | setup_root_refused (planted common.sh never runs) | ok |
+| AC-3 from-source still works | existing 44 install/uninstall scenarios, setup_from_source, install_after_setup | ok |
+| AC-2 packaged path | setup_legacy_migrate (42 checks), setup_legacy_keep_selection (vr-talex units/files/state removed, source renamed at same index, English stays current, --remove restores sources) | ok |
+
+## Rule check A2
+| Rule | Result |
+|---|---|
+| Acceptance criteria AC-2, AC-3 proven with evidence | pass |
+| No production/team-file edits by QC, no install/sudo/real systemctl --user | pass |
+| Probe data cleanup (BASE-17): sandboxes only, nothing committed to real DB/app | n/a |
+| Flaky tests | none seen |
+
+QC_PASS A2

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Sandbox tests for install.sh / uninstall.sh (AC-5, AC-6, SEC-19..24).
+# Sandbox tests for install.sh / uninstall.sh (AC-5, AC-6, SEC-19..24) and the
+# packaged vr-telex-setup (AC-3, with a stand-in package under the sandbox).
 #
 # Every scenario runs under `env -i` with a throwaway HOME, XDG dirs and
 # XDG_RUNTIME_DIR, on a private bus from `dbus-run-session` whose config
@@ -26,7 +27,10 @@ SCENARIOS=(fresh_fcitx5 fresh_no_fcitx5 empty_sources broken_daemon root_refused
   legacy_migrate legacy_rollback legacy_both_dirs legacy_foreign_file foreign_legacy_name_only
   uninstall_legacy legacy_without_backup legacy_source_only
   legacy_rollback_restore_fails legacy_backup_rm_fails legacy_rollback_default_key
-  legacy_source_order legacy_runtime_cleanup uninstall_legacy_runtime_cleanup legacy_newer_mode)
+  legacy_source_order legacy_runtime_cleanup uninstall_legacy_runtime_cleanup legacy_newer_mode
+  setup_fresh setup_root_refused setup_usage setup_no_package setup_broken_daemon setup_from_source
+  install_after_setup setup_unit_override setup_remove_without_backup setup_legacy_migrate
+  setup_legacy_keep_selection setup_from_source_edited setup_legacy_then_override)
 # A HOME with a space, an ampersand and a quote (special_home scenario).
 SPECIAL_HOME_NAME="h o&m'e"
 
@@ -1400,6 +1404,440 @@ t_legacy_newer_mode() {
   legacy_files_gone
   expect_installed
 }
+
+# --- packaged setup: vr-telex-setup (AC-3) -----------------------------------
+#
+# A stand-in for the installed package under $T8_SANDBOX/pkg: the shared
+# files as the .deb ships them (only those, so the setup cannot lean on the
+# checkout), the daemon at usr/bin/vr-telex and the packaged unit with its
+# ExecStart pointing there. The stub systemctl finds that unit through
+# VR_TELEX_SYSTEM_UNIT_DIR, as systemd finds /usr/lib/systemd/user units.
+# $1 = the daemon to package (default: fake-ime).
+PKG_SHARE_FILES=(common.sh 90-vr-telex.conf xinputrc org.fcitx.Fcitx5.desktop org.fcitx.Fcitx5.service)
+
+make_pkg() {
+  local daemon=${1:-$T8_STUBS/fake-ime} f
+  PKG=$T8_SANDBOX/pkg
+  if [ -e "$PKG" ]; then rm -rf -- "${PKG:?}"; fi
+  mkdir -p "$PKG/usr/bin" "$PKG/usr/share/vr-telex" "$PKG/usr/lib/systemd/user" "$T8_SANDBOX/nocargo"
+  for f in "${PKG_SHARE_FILES[@]}"; do install -m 0644 "$T8_REPO/packaging/$f" "$PKG/usr/share/vr-telex/$f"; done
+  install -m 0755 "$daemon" "$PKG/usr/bin/vr-telex"
+  install -m 0755 "$T8_REPO/packaging/vr-telex-setup" "$PKG/usr/bin/vr-telex-setup"
+  sed "s|^ExecStart=/usr/bin/vr-telex\$|ExecStart=$PKG/usr/bin/vr-telex|" \
+    "$T8_REPO/packaging/deb/vr-telex.service" >"$PKG/usr/lib/systemd/user/vr-telex.service"
+  grep -qxF "ExecStart=$PKG/usr/bin/vr-telex" "$PKG/usr/lib/systemd/user/vr-telex.service"
+  # A cargo that only logs: the setup must never build.
+  printf '#!/bin/sh\necho "cargo $*" >>"$XDG_RUNTIME_DIR/stub-calls.log"\nexit 1\n' >"$T8_SANDBOX/nocargo/cargo"
+  chmod +x "$T8_SANDBOX/nocargo/cargo"
+  export VR_TELEX_SYSTEM_UNIT_DIR=$PKG/usr/lib/systemd/user
+}
+
+run_setup() {
+  VR_TELEX_SHARE="$PKG/usr/share/vr-telex" VR_TELEX_BIN="$PKG/usr/bin/vr-telex" \
+    PATH="$T8_SANDBOX/nocargo:$PATH" bash "$PKG/usr/bin/vr-telex-setup" "$@"
+}
+
+pkg_sum() { (cd "$PKG" && find . -printf '%y %m %p\n' | LC_ALL=C sort && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum); }
+
+expect_setup_installed() {
+  local main u="$XDG_CONFIG_HOME/systemd/user" s="$PKG/usr/share/vr-telex"
+  main=$(systemctl --user show -p MainPID --value vr-telex.service)
+  check "vr-telex unit active" systemctl --user is-active --quiet vr-telex.service
+  check "vr-telex unit enabled" systemctl --user is-enabled --quiet vr-telex.service
+  check "enabled through the packaged unit" \
+    [ "$(readlink "$u/graphical-session.target.wants/vr-telex.service")" = "$VR_TELEX_SYSTEM_UNIT_DIR/vr-telex.service" ]
+  check "no unit file of its own in ~/.config/systemd/user" [ ! -e "$u/vr-telex.service" ]
+  check "nothing in ~/.local/bin" sh -c "! ls -A '$HOME/.local/bin' 2>/dev/null | grep -q ."
+  check "the daemon is the packaged binary" sh -c "tr '\0' '\n' </proc/$main/cmdline | grep -qxF \"\$1\"" _ "$PKG/usr/bin/vr-telex"
+  check "org.fcitx.Fcitx5 owned by the unit's MainPID ($main)" [ "$(owner_pid org.fcitx.Fcitx5)" = "$main" ]
+  check "IBus address file holds the daemon pid" addr_file_pid_is "$main"
+  check "environment.d = packaged file" cmp -s "$s/90-vr-telex.conf" "$XDG_CONFIG_HOME/environment.d/90-vr-telex.conf"
+  check "xinputrc = packaged file" cmp -s "$s/xinputrc" "$HOME/.xinputrc"
+  check "autostart override = packaged file" cmp -s "$s/org.fcitx.Fcitx5.desktop" "$XDG_CONFIG_HOME/autostart/org.fcitx.Fcitx5.desktop"
+  check "D-Bus activation shadow execs the packaged binary (quoted)" \
+    grep -qxF "Exec=\"$PKG/usr/bin/vr-telex\"" "$XDG_DATA_HOME/dbus-1/services/org.fcitx.Fcitx5.service"
+  check "backup manifest exists" [ -f "$XDG_DATA_HOME/vr-telex/backup/manifest" ]
+  check "backup dir is 0700" [ "$(stat -c %a "$XDG_DATA_HOME/vr-telex/backup")" = 700 ]
+  check "vr-telex source present exactly once" [ "$(gs sources | grep -o "('ibus', 'vr-telex')" | wc -l)" = 1 ]
+  check "vr-telex source selected (first in mru-sources)" [ "$(gs mru-sources | cut -c1-21)" = "[('ibus', 'vr-telex')" ]
+  check "never ran cargo" sh -c "! grep -q '^cargo' '$XDG_RUNTIME_DIR/stub-calls.log'"
+}
+
+t_setup_fresh() {
+  make_pkg
+  pre_state_fcitx5
+  local fpid sum0 out rc=0 main1 calls1
+  fpid=$(owner_pid org.fcitx.Fcitx5)
+  snap "$T8_SANDBOX/pre.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/pre.keyfile"
+  sum0=$(pkg_sum)
+  out=$(run_setup 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "vr-telex-setup exits 0" [ "$rc" = 0 ]
+  check "fcitx5 asked to quit, not killed" grep -qx 'fcitx5-remote -e' "$XDG_RUNTIME_DIR/stub-calls.log"
+  check "old fcitx5 ($fpid) has exited" sh -c "! kill -0 $fpid 2>/dev/null"
+  check "user manager reloaded (it may not know the packaged unit yet)" grep -qx 'systemctl --user daemon-reload' "$XDG_RUNTIME_DIR/stub-calls.log"
+  expect_setup_installed
+  check "keyfile after setup" diff -u - "$(keyfile)" <<'EOF'
+[org/gnome/desktop/input-sources]
+sources=[('xkb', 'us'), ('ibus', 'vr-telex')]
+mru-sources=[('ibus', 'vr-telex'), ('xkb', 'us')]
+EOF
+  check "daemon started only after vr-telex was first in mru-sources (D33)" started_with_vr_head 0
+  check "recovery path names vr-telex-setup --remove" grep -q "then 'vr-telex-setup --remove'" <<<"$out"
+  check "package files untouched" [ "$(pkg_sum)" = "$sum0" ]
+
+  main1=$(systemctl --user show -p MainPID --value vr-telex.service)
+  snap "$T8_SANDBOX/inst1.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/inst1.keyfile"
+  calls1=$(wc -l <"$XDG_RUNTIME_DIR/stub-calls.log")
+  check "second setup exits 0" run_setup
+  snap "$T8_SANDBOX/inst2.snap" noibus
+  check "second setup changes no file" same_snap "$T8_SANDBOX/inst1.snap" "$T8_SANDBOX/inst2.snap"
+  check "second setup leaves the keyfile byte-identical" cmp "$T8_SANDBOX/inst1.keyfile" "$(keyfile)"
+  check "second setup restarted the daemon (D33)" [ "$(systemctl --user show -p MainPID --value vr-telex.service)" != "$main1" ]
+  check "second setup restarted it with vr-telex first" started_with_vr_head "$calls1"
+
+  rc=0
+  out=$(run_setup --remove 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "vr-telex-setup --remove exits 0" [ "$rc" = 0 ]
+  snap "$T8_SANDBOX/post.snap" noibus
+  check "files restored exactly (snapshot = before setup)" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
+  check "keyfile restored byte for byte" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
+  check "unit no longer enabled" sh -c '! systemctl --user is-enabled --quiet vr-telex.service'
+  check "fcitx5 started again and owns org.fcitx.Fcitx5" has_owner org.fcitx.Fcitx5
+  check "package files untouched" [ "$(pkg_sum)" = "$sum0" ]
+  expect_no_vr_telex_left
+  rc=0
+  out=$(run_setup --remove 2>&1) || rc=$?
+  check "second --remove exits 0 and says not installed" sh -c '[ "$1" = 0 ] && printf "%s" "$2" | grep -q "not installed"' _ "$rc" "$out"
+}
+
+t_setup_root_refused() {
+  make_pkg
+  mkdir -p "$T8_SANDBOX/rootstub" "$T8_SANDBOX/evilshare"
+  printf '#!/bin/sh\n[ "$1" = -u ] && { echo 0; exit 0; }\nexec /usr/bin/id "$@"\n' >"$T8_SANDBOX/rootstub/id"
+  chmod +x "$T8_SANDBOX/rootstub/id"
+  # A shared dir the environment points at must not run as root either.
+  printf 'touch "%s/evil-ran"\n' "$T8_SANDBOX" >"$T8_SANDBOX/evilshare/common.sh"
+  # Real root cannot be had here (no user namespaces), so a copy of the
+  # script reads 0 where it reads bash's own EUID. That the copy differs
+  # proves the check reads EUID, which no PATH or environment can change.
+  perl -pe 's/\$\{?EUID\}?/0/g' "$PKG/usr/bin/vr-telex-setup" >"$T8_SANDBOX/asroot-setup"
+  check "the root check reads bash's EUID" sh -c "! cmp -s '$PKG/usr/bin/vr-telex-setup' '$T8_SANDBOX/asroot-setup'"
+  check "the interpreter is /bin/bash, not looked up in PATH" [ "$(head -n 1 "$PKG/usr/bin/vr-telex-setup")" = '#!/bin/bash' ]
+  snap "$T8_SANDBOX/pre.snap"
+  local out rc=0 arg
+  for arg in '' --remove; do
+    rc=0
+    out=$(PATH="$T8_SANDBOX/rootstub:$PATH" run_setup $arg 2>&1) || rc=$?
+    printf '%s\n' "$out"
+    check "vr-telex-setup $arg as root (id says 0) exits 1" [ "$rc" = 1 ]
+    check "vr-telex-setup $arg as root (id says 0) explains" grep -q 'do not run as root' <<<"$out"
+    rc=0
+    out=$(VR_TELEX_SHARE="$T8_SANDBOX/evilshare" bash "$T8_SANDBOX/asroot-setup" $arg 2>&1) || rc=$?
+    printf '%s\n' "$out"
+    check "vr-telex-setup $arg as root (EUID 0) exits 1 and explains" sh -c '[ "$1" = 1 ] && printf "%s" "$2" | grep -q "do not run as root"' _ "$rc" "$out"
+    check "vr-telex-setup $arg as root (EUID 0) reads no shared file first" [ ! -e "$T8_SANDBOX/evil-ran" ]
+  done
+  snap "$T8_SANDBOX/post.snap"
+  check "nothing changed" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
+  check "no systemctl call" [ ! -s "$XDG_RUNTIME_DIR/stub-calls.log" ]
+}
+
+t_setup_usage() {
+  make_pkg
+  snap "$T8_SANDBOX/pre.snap"
+  local out rc=0
+  out=$(run_setup --bogus 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "unknown option exits 2" [ "$rc" = 2 ]
+  check "unknown option prints the usage" grep -q 'vr-telex-setup --remove' <<<"$out"
+  rc=0
+  out=$(run_setup --remove extra 2>&1) || rc=$?
+  check "extra argument exits 2" [ "$rc" = 2 ]
+  rc=0
+  out=$(run_setup --help 2>&1) || rc=$?
+  check "--help exits 0 with the usage" sh -c '[ "$1" = 0 ] && printf "%s" "$2" | grep -q -- "--remove"' _ "$rc" "$out"
+  snap "$T8_SANDBOX/post.snap"
+  check "nothing changed" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
+  check "no systemctl call" [ ! -s "$XDG_RUNTIME_DIR/stub-calls.log" ]
+}
+
+t_setup_no_package() {
+  make_pkg
+  gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us')]"
+  snap "$T8_SANDBOX/pre.snap"
+  local out rc=0
+  mkdir -p "$T8_SANDBOX/nounits"
+  out=$(VR_TELEX_SYSTEM_UNIT_DIR="$T8_SANDBOX/nounits" run_setup 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "without the packaged unit: exits 1" [ "$rc" = 1 ]
+  check "without the packaged unit: names it" grep -qF "$T8_SANDBOX/nounits/vr-telex.service" <<<"$out"
+  rc=0
+  out=$(VR_TELEX_SHARE="$T8_SANDBOX/noshare" VR_TELEX_BIN="$PKG/usr/bin/vr-telex" bash "$PKG/usr/bin/vr-telex-setup" 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "without the shared files: exits 1 and names them" sh -c '[ "$1" = 1 ] && printf "%s" "$2" | grep -qF "$3/common.sh"' _ "$rc" "$out" "$T8_SANDBOX/noshare"
+  if [ ! -e /usr/bin/vr-telex ]; then
+    # The defaults are the package paths.
+    rc=0
+    out=$(env -u VR_TELEX_BIN VR_TELEX_SHARE="$PKG/usr/share/vr-telex" bash "$PKG/usr/bin/vr-telex-setup" 2>&1) || rc=$?
+    printf '%s\n' "$out"
+    check "default binary is /usr/bin/vr-telex" sh -c '[ "$1" = 1 ] && printf "%s" "$2" | grep -qF "/usr/bin/vr-telex "' _ "$rc" "$out"
+  else
+    echo "skip default-path check: /usr/bin/vr-telex exists on this machine"
+  fi
+  snap "$T8_SANDBOX/post.snap"
+  check "nothing changed" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
+  check "no systemctl call that changes anything" sh -c "! grep -Eq 'systemctl --user (enable|disable|start|stop|restart|daemon-reload)' '$XDG_RUNTIME_DIR/stub-calls.log'"
+}
+
+t_setup_broken_daemon() {
+  make_pkg "$T8_STUBS/broken-vr-telex"
+  pre_state_fcitx5
+  snap "$T8_SANDBOX/pre.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/pre.keyfile"
+  local out rc=0
+  out=$(run_setup 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "setup with a dying daemon exits non-zero" [ "$rc" -ne 0 ]
+  check "says it rolled back" grep -qi 'rolled back' <<<"$out"
+  check "prints the recovery path with vr-telex-setup --remove" grep -q "systemctl --user disable --now vr-telex.service', then 'vr-telex-setup --remove'" <<<"$out"
+  check "the failing daemon was started with vr-telex selected" started_with_vr_head 0
+  snap "$T8_SANDBOX/post.snap" noibus
+  check "rollback restored every file" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
+  check "input sources restored exactly" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
+  check "unit not left enabled" sh -c '! systemctl --user is-enabled --quiet vr-telex.service'
+  check "fcitx5 runs again after rollback" has_owner org.fcitx.Fcitx5
+  expect_no_vr_telex_left
+}
+
+t_setup_from_source() {
+  # A from-source install switched to the package: its binary and unit go,
+  # the packaged unit runs, the first backup is kept, and --remove still
+  # returns to the state before the first install.
+  make_pkg
+  pre_state_fcitx5
+  snap "$T8_SANDBOX/pre.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/pre.keyfile"
+  check "install.sh exits 0" run_install
+  cp "$XDG_DATA_HOME/vr-telex/backup/manifest" "$T8_SANDBOX/manifest.src"
+  local out rc=0
+  out=$(run_setup 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "vr-telex-setup over a from-source install exits 0" [ "$rc" = 0 ]
+  expect_setup_installed
+  check "the first backup is kept" cmp -s "$T8_SANDBOX/manifest.src" "$XDG_DATA_HOME/vr-telex/backup/manifest"
+  check "no copy of the from-source files kept aside" sh -c "! find '$HOME' -name '*vr-telex-saved-*' | grep -q ."
+  check "user manager reloaded after the user unit went" grep -qx 'systemctl --user daemon-reload' "$XDG_RUNTIME_DIR/stub-calls.log"
+  check "--remove exits 0" run_setup --remove
+  snap "$T8_SANDBOX/post.snap" noibus
+  check "files back to the state before the first install" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
+  check "keyfile back to the state before the first install" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
+  check "fcitx5 runs again" has_owner org.fcitx.Fcitx5
+  expect_no_vr_telex_left
+}
+
+t_install_after_setup() {
+  # The other way: install.sh over the packaged setup takes over with its
+  # own binary and unit; uninstall.sh returns to the state before both.
+  make_pkg
+  pre_state_fcitx5
+  snap "$T8_SANDBOX/pre.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/pre.keyfile"
+  check "vr-telex-setup exits 0" run_setup
+  check "install.sh over the setup exits 0" run_install
+  expect_installed
+  local main
+  main=$(systemctl --user show -p MainPID --value vr-telex.service)
+  check "the daemon is now ~/.local/bin/vr-telex" sh -c "tr '\0' '\n' </proc/$main/cmdline | grep -qxF \"\$1\"" _ "$HOME/.local/bin/vr-telex"
+  check "uninstall.sh exits 0" run_uninstall
+  snap "$T8_SANDBOX/post.snap" noibus
+  check "files back to the state before both" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
+  check "keyfile back to the state before both" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
+  expect_no_vr_telex_left
+}
+
+# A unit of the user's that the packaged one must not run behind.
+plant_user_unit() {
+  mkdir -p "$XDG_CONFIG_HOME/systemd/user"
+  printf '[Service]\nExecStart=/bin/true\n' >"$XDG_CONFIG_HOME/systemd/user/vr-telex.service"
+}
+
+# The setup with a user unit in place stops before any change, naming it.
+expect_override_refused() {
+  local out rc=0
+  snap "$T8_SANDBOX/mid.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/mid.keyfile"
+  out=$(run_setup 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "$1: setup exits 1" [ "$rc" = 1 ]
+  check "$1: names the overriding unit" grep -qF "$XDG_CONFIG_HOME/systemd/user/vr-telex.service would replace the packaged unit" <<<"$out"
+  snap "$T8_SANDBOX/post.snap" noibus
+  check "$1: nothing changed" same_snap "$T8_SANDBOX/mid.snap" "$T8_SANDBOX/post.snap"
+  check "$1: keyfile unchanged" cmp "$T8_SANDBOX/mid.keyfile" "$(keyfile)"
+  check "$1: no systemctl call that changes anything" sh -c "! grep -Eq 'systemctl --user (enable|disable|start|stop|restart)' '$XDG_RUNTIME_DIR/stub-calls.log'"
+}
+
+t_setup_unit_override() {
+  # A unit file of the user's in ~/.config/systemd/user would replace the
+  # packaged one: refused before anything changes, with or without a
+  # vr-telex backup (without one, the "installed without a backup" advice
+  # would send the user round in a loop).
+  make_pkg
+  gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us')]"
+  plant_user_unit
+  expect_override_refused "no backup"
+  rm -f -- "$XDG_CONFIG_HOME/systemd/user/vr-telex.service"
+  check "vr-telex-setup exits 0" run_setup
+  plant_user_unit
+  : >"$XDG_RUNTIME_DIR/stub-calls.log"
+  expect_override_refused "with a backup"
+  # A from-source unit whose backup is gone still gets the uninstall advice.
+  rm -f -- "$XDG_CONFIG_HOME/systemd/user/vr-telex.service"
+  check "--remove exits 0" run_setup --remove
+  check "install.sh exits 0" run_install
+  rm -rf -- "${XDG_DATA_HOME:?}/vr-telex/backup"
+  local out rc=0
+  out=$(run_setup 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "from-source unit without a backup: exits 1 with the uninstall advice" \
+    sh -c '[ "$1" = 1 ] && printf "%s" "$2" | grep -q "installed without a backup; run vr-telex-setup --remove first"' _ "$rc" "$out"
+}
+
+t_setup_from_source_edited() {
+  # A from-source unit and binary the user changed after install.sh are moved
+  # aside, not deleted, when the package takes over.
+  make_pkg
+  pre_state_fcitx5
+  snap "$T8_SANDBOX/pre.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/pre.keyfile"
+  check "install.sh exits 0" run_install
+  printf '# my unit edit\n' >>"$XDG_CONFIG_HOME/systemd/user/vr-telex.service"
+  printf '# my binary edit\n' >>"$HOME/.local/bin/vr-telex"
+  local out rc=0 su sb main u="$XDG_CONFIG_HOME/systemd/user"
+  out=$(run_setup 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "vr-telex-setup exits 0" [ "$rc" = 0 ]
+  su=$(saved_copy "$u/vr-telex.service")
+  sb=$(saved_copy "$HOME/.local/bin/vr-telex")
+  check "edited unit kept aside with the edit" sh -c '[ -n "$1" ] && grep -qx "# my unit edit" "$1"' _ "$su"
+  check "edited binary kept aside with the edit" sh -c '[ -n "$1" ] && grep -qx "# my binary edit" "$1"' _ "$sb"
+  check "warning names the kept unit" grep -qF "${su:-none}" <<<"$out"
+  check "no unit file of its own in ~/.config/systemd/user" [ ! -e "$u/vr-telex.service" ]
+  check "no ~/.local/bin/vr-telex" [ ! -e "$HOME/.local/bin/vr-telex" ]
+  check "enabled through the packaged unit" \
+    [ "$(readlink "$u/graphical-session.target.wants/vr-telex.service")" = "$VR_TELEX_SYSTEM_UNIT_DIR/vr-telex.service" ]
+  main=$(systemctl --user show -p MainPID --value vr-telex.service)
+  check "the daemon is the packaged binary" sh -c "tr '\0' '\n' </proc/$main/cmdline | grep -qxF \"\$1\"" _ "$PKG/usr/bin/vr-telex"
+  check "--remove exits 0" run_setup --remove
+  # The kept copies stay, and so do the dirs that hold them.
+  local keep='vr-telex-saved-|^d [0-7]+ \./\.local -> $|^d [0-7]+ \./\.local/bin -> $|^d [0-7]+ \./\.config/systemd(/user)? -> $'
+  snap "$T8_SANDBOX/post.snap" noibus
+  grep -Ev "$keep" "$T8_SANDBOX/pre.snap" >"$T8_SANDBOX/pre.cmp" || true
+  grep -Ev "$keep" "$T8_SANDBOX/post.snap" >"$T8_SANDBOX/post.cmp" || true
+  check "everything else back to the state before install.sh" same_snap "$T8_SANDBOX/pre.cmp" "$T8_SANDBOX/post.cmp"
+  check "keyfile back to the state before install.sh" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
+  check "both kept copies still there" sh -c '[ -f "$1" ] && [ -f "$2" ]' _ "$su" "$sb"
+}
+
+t_setup_legacy_then_override() {
+  # After a vr-talex move through the setup, the backup holds no record of
+  # files the package never writes, so a later unit of the user's is
+  # refused, not moved aside.
+  make_pkg
+  check "vr-talex installer exits 0" legacy_install
+  check "vr-telex-setup over vr-talex exits 0" run_setup
+  plant_user_unit
+  : >"$XDG_RUNTIME_DIR/stub-calls.log"
+  expect_override_refused "after the move"
+  check "the user's unit is where it was" grep -qx 'ExecStart=/bin/true' "$XDG_CONFIG_HOME/systemd/user/vr-telex.service"
+}
+
+t_setup_remove_without_backup() {
+  make_pkg
+  check "vr-telex-setup exits 0" run_setup
+  rm -rf -- "${XDG_DATA_HOME:?}/vr-telex/backup"
+  local out rc=0
+  out=$(run_setup --remove 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "--remove without backup exits 0" [ "$rc" = 0 ]
+  check "warns that no backup exists" grep -q 'no backup found' <<<"$out"
+  check "unit disabled" sh -c '! systemctl --user is-enabled --quiet vr-telex.service'
+  check "vr-telex unit inactive" sh -c '! systemctl --user is-active --quiet vr-telex.service'
+  check "environment.d file removed" [ ! -e "$XDG_CONFIG_HOME/environment.d/90-vr-telex.conf" ]
+  check "autostart override removed" [ ! -e "$XDG_CONFIG_HOME/autostart/org.fcitx.Fcitx5.desktop" ]
+  check "D-Bus shadow removed" [ ! -e "$XDG_DATA_HOME/dbus-1/services/org.fcitx.Fcitx5.service" ]
+  check "our xinputrc removed" [ ! -e "$HOME/.xinputrc" ]
+}
+
+t_setup_legacy_migrate() {
+  # AC-2 through the packaged setup: vr-talex (current) is moved to the
+  # packaged vr-telex, and --remove returns to the state before vr-talex.
+  make_pkg
+  pre_state_fcitx5
+  snap "$T8_SANDBOX/pre.snap" noibus
+  cp "$(keyfile)" "$T8_SANDBOX/pre.keyfile"
+  check "vr-talex installer exits 0" legacy_install
+  mkdir -p "$XDG_STATE_HOME/vr-talex"
+  printf 'EN\n' >"$XDG_STATE_HOME/vr-talex/mode"
+  local out rc=0 calls0 calls1
+  calls0=$(wc -l <"$XDG_RUNTIME_DIR/stub-calls.log")
+  out=$(run_setup 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "vr-telex-setup over vr-talex exits 0" [ "$rc" = 0 ]
+  check "says it moved the vr-talex install" grep -q 'moved the vr-talex install to vr-telex' <<<"$out"
+  legacy_files_gone
+  check "90-vr-talex.conf removed" [ ! -e "$XDG_CONFIG_HOME/environment.d/90-vr-talex.conf" ]
+  check "~/.local/share/vr-talex removed" [ ! -e "$XDG_DATA_HOME/vr-talex" ]
+  check "sources: vr-talex renamed in place" [ "$(gs sources)" = "[('xkb', 'us'), ('ibus', 'vr-telex')]" ]
+  expect_setup_installed
+  check "VI/EN mode carried over" [ "$(cat "$XDG_STATE_HOME/vr-telex/mode" 2>/dev/null)" = EN ]
+  no_migration_leftovers
+  check "daemon started only with vr-telex first in mru-sources" started_with_vr_head "$calls0"
+  snap "$T8_SANDBOX/inst1.snap" noibus
+  calls1=$(wc -l <"$XDG_RUNTIME_DIR/stub-calls.log")
+  rc=0
+  out=$(run_setup 2>&1) || rc=$?
+  check "second setup exits 0 and finds nothing of vr-talex" sh -c '[ "$1" = 0 ] && ! printf "%s" "$2" | grep -q vr-talex' _ "$rc" "$out"
+  snap "$T8_SANDBOX/inst2.snap" noibus
+  check "second setup changes no file" same_snap "$T8_SANDBOX/inst1.snap" "$T8_SANDBOX/inst2.snap"
+  check "second setup did not touch vr-talex" sh -c "tail -n +$((calls1 + 1)) '$XDG_RUNTIME_DIR/stub-calls.log' | grep -Eq '^systemctl --user (disable|enable|stop|start|restart) .*vr-talex' && exit 1 || exit 0"
+  check "--remove exits 0" run_setup --remove
+  snap "$T8_SANDBOX/post.snap" noibus
+  check "files back to the state before vr-talex" same_snap "$T8_SANDBOX/pre.snap" "$T8_SANDBOX/post.snap"
+  check "keyfile back to the state before vr-talex" cmp "$T8_SANDBOX/pre.keyfile" "$(keyfile)"
+  check "fcitx5 started again" has_owner org.fcitx.Fcitx5
+  expect_no_vr_telex_left
+}
+
+t_setup_legacy_keep_selection() {
+  # AC-2: the packaged setup keeps the current source current, like
+  # install.sh (legacy_was_current + MIG_KEEP_SELECTION).
+  make_pkg
+  pre_state_fcitx5
+  check "vr-talex installer exits 0" legacy_install
+  gsettings set org.gnome.desktop.input-sources sources "[('ibus', 'vr-talex'), ('xkb', 'us'), ('xkb', 'fr')]"
+  gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'us'), ('ibus', 'vr-talex'), ('xkb', 'fr')]"
+  local out rc=0
+  out=$(run_setup 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "vr-telex-setup exits 0" [ "$rc" = 0 ]
+  check "sources: renamed at index 0, others in order" \
+    [ "$(gs sources)" = "[('ibus', 'vr-telex'), ('xkb', 'us'), ('xkb', 'fr')]" ]
+  check "mru-sources: English still current, vr-telex at its old place" \
+    [ "$(gs mru-sources)" = "[('xkb', 'us'), ('ibus', 'vr-telex'), ('xkb', 'fr')]" ]
+  check "does not claim to have put vr-telex first" sh -c '! printf "%s" "$1" | grep -q "first"' _ "$out"
+  legacy_files_gone
+  no_migration_leftovers
+  check "vr-telex unit active" systemctl --user is-active --quiet vr-telex.service
+  check "--remove exits 0" run_setup --remove
+  check "sources after --remove" [ "$(gs sources)" = "[('xkb', 'us'), ('xkb', 'fr')]" ]
+  check "mru-sources after --remove" [ "$(gs mru-sources)" = "[('xkb', 'us'), ('xkb', 'fr')]" ]
+  expect_no_vr_telex_left
+}
+
 
 in_sandbox() {
   local name=$1

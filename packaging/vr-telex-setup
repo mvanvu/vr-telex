@@ -1,0 +1,67 @@
+#!/bin/bash
+# Turn vr-telex on for the current user after the vr-telex package put it on
+# the system (AC-3): `vr-telex-setup` sets it up, `vr-telex-setup --remove`
+# restores what it saved. It runs the same install / uninstall logic as
+# install.sh / uninstall.sh of a checkout (/usr/share/vr-telex/common.sh),
+# with the packaged binary /usr/bin/vr-telex and the packaged user unit
+# /usr/lib/systemd/user/vr-telex.service, which `systemctl --user enable`
+# links into this user's graphical session. Nothing is built or downloaded,
+# and nothing is written to ~/.local/bin or ~/.config/systemd/user except
+# that link. A vr-talex install (the old name) is moved over as install.sh
+# does; a from-source install of vr-telex is replaced.
+#
+# Test seams: VR_TELEX_SHARE (shared files, default /usr/share/vr-telex),
+# VR_TELEX_BIN (daemon, default /usr/bin/vr-telex), VR_TELEX_SYSTEM_UNIT_DIR
+# (dir of the packaged unit, default /usr/lib/systemd/user),
+# VR_TELEX_TIMEOUT, VR_TELEX_OS_RELEASE.
+set -euo pipefail
+umask 022
+
+# Refused before any shared file is read, so root never runs code from a
+# path the environment chose. EUID is set by bash itself, so no PATH lookup
+# or environment variable can change it; the interpreter is not looked up in
+# PATH either.
+if [ "$EUID" -eq 0 ]; then
+  printf 'vr-telex: error: do not run as root or with sudo; run it as your own user\n' >&2
+  exit 1
+fi
+
+usage() {
+  cat <<'EOF'
+Usage: vr-telex-setup           set up the Vietnamese (Telex) input method for you
+       vr-telex-setup --remove  undo it and restore your earlier input method setup
+
+Run it as your own user from your desktop session, not with sudo. Run
+vr-telex-setup --remove before removing the vr-telex package.
+EOF
+}
+
+action=install
+case "$#:${1:-}" in
+  0:) ;;
+  1:--remove) action=remove ;;
+  1:-h | 1:--help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+SHARE=${VR_TELEX_SHARE:-/usr/share/vr-telex}
+if [ ! -f "$SHARE/common.sh" ]; then
+  printf 'vr-telex: error: %s/common.sh not found; reinstall the vr-telex package\n' "$SHARE" >&2
+  exit 1
+fi
+# shellcheck source=packaging/common.sh
+. "$SHARE/common.sh"
+use_package "$SHARE"
+
+if [ "$action" = install ]; then
+  trap on_exit EXIT
+  install_main
+else
+  uninstall_main
+fi
