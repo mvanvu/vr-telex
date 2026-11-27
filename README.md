@@ -74,12 +74,30 @@ The tone goes on the modern position (`hoà`, `thuý`). Upper case is kept per l
 (`Vieetj` → Việt). A word that cannot be Vietnamese (`class`, `https`, `git`) stays exactly
 as typed.
 
+### English words
+
+When a word ends (space, punctuation, Enter, focus change), the IME checks it once more:
+
+- a word that is only the start of a Vietnamese syllable goes back to the keys typed
+  (`use`, `user`, `two`, `aw`); words without a vowel keep their letters (`dd` → đ);
+- an English word whose Vietnamese form is not a real syllable goes back to the keys
+  typed, in the case typed;
+- a word that is both (`best` / bét, `list` / lít) follows the previous word in the same
+  field: after an English word it stays English (`the best`, `use the best`), otherwise it
+  stays Vietnamese (`rất bét`, or first in the field). A common English word typed as is
+  (`the`, `with`, `would`) counts as English; any other word typed as is (`ba`, `to`) does
+  not change the previous word's language; focus changes and toggles reset it.
+
+There is no setting and nothing to undo: retype the word if it came out wrong. The word
+lists are built into the binary (sources and licences in `tools/wordlists/README.md`
+and `THIRD-PARTY-NOTICES.md`); nothing is read or downloaded at run time.
+
 ## Known limits
 
 | Limit | Detail |
 |---|---|
 | `aa` `ee` `oo` must be adjacent | The two keys must be next to each other to change the vowel. |
-| Some words cannot be typed | `uow` always gives `ươ`, so `thuở` and `huơ` are not possible. After undo by repeating a key the rest of the word stays raw, so `xoong` is not possible. |
+| Some words cannot be typed | `uow` always gives `ươ`, so `thuở` and `huơ` are not possible. |
 | VS Code integrated terminal | Letters can be lost when keys arrive faster than about 30 ms apart. This is an xterm.js limitation; human typing is far slower. |
 | Chrome address bar | Tab moves focus to the suggestion's remove button (Chrome's own behaviour, in English too). Use Enter, or → / End then Enter. |
 | Qt apps | They need the fcitx5 Qt frontend package (`fcitx5-frontend-qt5` and/or `fcitx5-frontend-qt6`). Without it Qt apps have no Vietnamese input. Qt apps started before install keep receiving raw keys until restarted; nothing is lost. |

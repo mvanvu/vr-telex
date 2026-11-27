@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::time::Instant;
 
-use telex_core::Composer;
+use telex_core::{Composer, Lang};
 use tokio::sync::watch;
 use zeroize::Zeroize;
 
@@ -138,6 +138,9 @@ struct Context {
     pending: Vec<Action>,
     /// The word outgrew [`MAX_WORD_KEYS`]: its remaining letters pass through.
     overflowed: bool,
+    /// Language of the last word ended in this context, which decides an
+    /// overlap word (AC-3). Only the language is kept, never the text.
+    last: Lang,
 }
 
 impl Context {
@@ -148,24 +151,66 @@ impl Context {
             tap: TapDetector::default(),
             pending: Vec::new(),
             overflowed: false,
+            last: Lang::Unknown,
         }
     }
 
-    /// Ends the word: the client gets all of it, nothing of it stays here.
+    /// Ends the word at a key, with the cursor still right after it: the
+    /// client gets all of it as [`Composer::finish`] decides, nothing of it
+    /// stays here, and its language becomes `last`.
     fn flush(&mut self, out: &mut Vec<Action>) {
+        self.end_word(out, true);
+    }
+
+    /// Ends the word on a click, a focus change, a switch-off or a teardown.
+    /// The client may have moved its cursor already, so a surrounding-text
+    /// client keeps the word it shows and nothing is rewritten (D13).
+    fn flush_away(&mut self, out: &mut Vec<Action>) {
+        self.end_word(out, false);
+    }
+
+    fn end_word(&mut self, out: &mut Vec<Action>, at_cursor: bool) {
         self.overflowed = false;
         if self.composer.is_empty() {
             return;
         }
-        let edit = Edit::of(self.caps);
-        if edit == Edit::Preedit {
-            out.push(Action::HidePreedit);
+        let shown = self.composer.text();
+        let finished = self.composer.finish(self.last);
+        match Edit::of(self.caps) {
+            Edit::Preedit => {
+                out.push(Action::HidePreedit);
+                if !finished.text.is_empty() {
+                    out.push(Action::Commit(finished.text.to_owned()));
+                }
+            }
+            Edit::Hold if !finished.text.is_empty() => {
+                out.push(Action::Commit(finished.text.to_owned()));
+            }
+            // The client already holds the shown text: it is replaced only
+            // when the finished word differs and the cursor is known.
+            Edit::Surrounding if at_cursor && finished.text != shown => {
+                let stale = shown.chars().count();
+                if stale > 0 {
+                    out.push(Action::DeleteSurrounding {
+                        offset: -i32::try_from(stale).unwrap_or(i32::MAX),
+                        chars: stale.try_into().unwrap_or(u32::MAX),
+                    });
+                }
+                if !finished.text.is_empty() {
+                    out.push(Action::Commit(finished.text.to_owned()));
+                }
+            }
+            Edit::Hold | Edit::Surrounding | Edit::Off => {}
         }
-        // In surrounding mode the client already holds the word.
-        if matches!(edit, Edit::Preedit | Edit::Hold) && !self.composer.text().is_empty() {
-            out.push(Action::Commit(self.composer.text().to_owned()));
-        }
+        self.last = finished.lang;
         self.composer.clear();
+    }
+
+    /// As [`Context::flush_away`], then the next word starts with no
+    /// language: the field or the cursor changed.
+    fn flush_away_and_forget(&mut self, out: &mut Vec<Action>) {
+        self.flush_away(out);
+        self.last = Lang::Unknown;
     }
 
     /// Changes the word with `change` and tells the client what to show.
@@ -263,7 +308,7 @@ impl Ime {
             return Vec::new();
         };
         let mut out = std::mem::take(&mut ctx.pending);
-        ctx.flush(&mut out);
+        ctx.flush_away(&mut out);
         out
     }
 
@@ -276,7 +321,10 @@ impl Ime {
         };
         if Edit::of(ctx.caps) != Edit::of(caps) {
             let mut out = std::mem::take(&mut ctx.pending);
-            ctx.flush(&mut out);
+            // No key drives this, so the cursor may be elsewhere: a
+            // surrounding-text client keeps the shown word (D13, D17). `last`
+            // stays: the field and the cursor did not change.
+            ctx.flush_away(&mut out);
             ctx.pending = out;
         }
         ctx.caps = caps;
@@ -294,6 +342,8 @@ impl Ime {
         if let Some(ctx) = self.contexts.get_mut(&id) {
             // Modifier presses or releases may have gone to another context.
             ctx.tap.reset();
+            // A new focus starts a new run of words.
+            ctx.last = Lang::Unknown;
         }
     }
 
@@ -304,11 +354,13 @@ impl Ime {
         };
         ctx.tap.reset();
         let mut out = std::mem::take(&mut ctx.pending);
-        ctx.flush(&mut out);
+        ctx.flush_away_and_forget(&mut out);
         out
     }
 
     /// Commits the word, never drops it: a click or a cursor move (B3).
+    /// A preedit client that commits its shown preedit on reset keeps the
+    /// shown text instead of the finished one (D12).
     pub fn reset(&mut self, id: CtxId) -> Vec<Action> {
         let Some(ctx) = self.contexts.get_mut(&id) else {
             return Vec::new();
@@ -316,7 +368,7 @@ impl Ime {
         // Ctrl+Shift+click is a shortcut of the application, not a tap.
         ctx.tap.spoil();
         let mut out = std::mem::take(&mut ctx.pending);
-        ctx.flush(&mut out);
+        ctx.flush_away_and_forget(&mut out);
         out
     }
 
@@ -347,6 +399,7 @@ impl Ime {
                 if ctx.tap.chord_key(key, release, foreign, (self.clock)()) {
                     // The word belongs to the mode it was typed in (B3).
                     ctx.flush(&mut actions);
+                    ctx.last = Lang::Unknown;
                     self.mode = self.mode.toggled();
                     self.mode_tx.send_replace(self.mode);
                 }
@@ -378,6 +431,8 @@ impl Ime {
             KeyClass::Letter(_) if ctx.composer.raw().len() >= MAX_WORD_KEYS => {
                 ctx.flush(&mut actions);
                 ctx.overflowed = true;
+                // A run of letters this long is no Vietnamese word.
+                ctx.last = Lang::En;
                 pass(actions)
             }
             KeyClass::Letter(ch) => {
@@ -403,6 +458,13 @@ impl Ime {
                     handled: true,
                     actions,
                 }
+            }
+            KeyClass::BackSpace => {
+                // The client deletes text this context no longer tracks, so
+                // the previous word may be gone (D16).
+                ctx.flush(&mut actions);
+                ctx.last = Lang::Unknown;
+                pass(actions)
             }
             _ => {
                 ctx.flush(&mut actions);
@@ -439,7 +501,7 @@ impl Ime {
         for ctx in self.contexts.values_mut() {
             if !on {
                 let mut out = std::mem::take(&mut ctx.pending);
-                ctx.flush(&mut out);
+                ctx.flush_away_and_forget(&mut out);
                 ctx.pending = out;
             }
             ctx.tap.reset();
@@ -472,9 +534,10 @@ impl Ime {
                 ctx.composer.clear();
                 ctx.pending.clear();
                 ctx.overflowed = false;
+                ctx.last = Lang::Unknown;
             } else {
                 let mut out = std::mem::take(&mut ctx.pending);
-                ctx.flush(&mut out);
+                ctx.flush_away(&mut out);
                 ctx.pending = out;
             }
             ctx.tap.reset();

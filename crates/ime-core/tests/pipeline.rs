@@ -301,8 +301,10 @@ fn an_overlong_word_is_committed_and_the_rest_passes_through() {
     // Still the same word: Telex keys stay literal until a boundary.
     app.type_str(&mut ime, id, "as");
     assert_eq!(app.text, format!("{long}as"));
-    app.type_str(&mut ime, id, " as ");
-    assert_eq!(app.text, format!("{long}as á "));
+    // The next word is composed again. The overlong run counts as English,
+    // so the overlap word `as` (`á`) after it is restored (AC-3).
+    app.type_str(&mut ime, id, " as dduwowcj ");
+    assert_eq!(app.text, format!("{long}as as được "));
 }
 
 #[test]

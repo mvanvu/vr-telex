@@ -26,3 +26,4 @@
 - IBus value builders (IBusText, IBusAttrList, IBusEngineDesc, IBusProperty, IBusPropList) on `zbus::Structure::builder` — crates/fe-ibus/src/ibus.rs (T5)
 - Test bus + libibus-like client (`Bus`, `Sandbox`, `Client` with wire-ordered answers, `Seen`, key/tap/toggle helpers) — crates/fe-ibus/tests/common/mod.rs (T5)
 - `workspace/qa-artifacts/T5/qt5/session.sh <daemon> <run dir>` — isolated headless GNOME session (tests/e2e/lib.sh guard) with a FIFO command channel (`echo cmd > RUN/cmd; cat RUN/reply`) for driving any app by hand; Qt 5 IBus needs an `ibus-daemon` executable on PATH (T5 fix 1).
+- `CharBuf` (stack copy of a word's letters, wiped) + `spells(chars, "ng")` for heap-free checks of typed letters — crates/telex-core/src/lib.rs (P5-1; crate-private). `gen.py --both-only` regenerates `en_both.txt` from the committed vi.txt — tools/wordlists/gen.py (P5-1)

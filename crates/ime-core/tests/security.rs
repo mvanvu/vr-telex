@@ -70,8 +70,8 @@ fn turning_into_a_password_field_commits_the_word_first() {
     // Back to a normal field: composing resumes with an empty word.
     ime.set_caps(id, PREEDIT);
     assert!(ime.take_pending(id).is_empty());
-    app.type_str(&mut ime, id, " aas ");
-    assert_eq!(app.text, "viêtaas ấ ");
+    app.type_str(&mut ime, id, " aans ");
+    assert_eq!(app.text, "viêtaas ấn ");
 }
 
 #[test]

@@ -889,8 +889,8 @@ async fn a_client_leaving_does_not_disturb_the_others() {
     b.type_pipelined("vieetj ").await;
     assert_eq!(b.text, "việt ");
     let mut c = App::open(&bus, VTE_CAPS).await;
-    c.type_pipelined("ddaa ").await;
-    assert_eq!(c.text, "đâ ");
+    c.type_pipelined("ddaau ").await;
+    assert_eq!(c.text, "đâu ");
     assert!(!server.is_finished());
 }
 

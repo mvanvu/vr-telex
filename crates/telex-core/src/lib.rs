@@ -11,6 +11,8 @@
 
 use std::fmt;
 
+mod words;
+
 /// State of the word after a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -20,6 +22,35 @@ pub enum Outcome {
     /// syllable fits) or the text left by an undo-by-repeat. Further keys of
     /// this word are appended as typed.
     Invalid,
+}
+
+/// Language of a committed word, kept per input field to decide the next
+/// word that is both English and Vietnamese (AC-3). Holds no text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Lang {
+    #[default]
+    Unknown,
+    En,
+    Vi,
+}
+
+/// What to commit at the end of a word, and the language it counts as.
+/// Borrows the composer's own buffers. `Debug` hides the text (SEC-2).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Finished<'a> {
+    pub text: &'a str,
+    pub lang: Lang,
+}
+
+impl fmt::Debug for Finished<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Finished {{ <redacted len={}>, lang: {:?} }}",
+            self.text.chars().count(),
+            self.lang
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -130,11 +161,11 @@ impl Default for Composer {
 impl Composer {
     pub fn new() -> Self {
         Self {
-            raw: String::new(),
-            letters: Vec::new(),
+            raw: String::with_capacity(WORD_BYTES),
+            letters: Vec::with_capacity(WORD_KEYS),
             tone: Tone::None,
             mode: Mode::Viet,
-            text: String::new(),
+            text: String::with_capacity(WORD_BYTES),
             tone_key_last: false,
             tone_at: 0,
             horn_at: None,
@@ -144,7 +175,9 @@ impl Composer {
 
     /// Feeds one key (`a`-`z`, `A`-`Z`). Any other character turns the word
     /// into passthrough and is appended as is. Returns the state of the word;
-    /// the rendered word is [`Composer::text`].
+    /// the rendered word is [`Composer::text`]. The buffers are sized for a
+    /// word of up to 32 keys (ime-core `MAX_WORD_KEYS`); past that they grow
+    /// by reallocation and the old blocks are not wiped (SEC-4).
     pub fn push(&mut self, ch: char) -> Outcome {
         self.raw.push(ch);
         self.tone_key_last = false;
@@ -153,9 +186,15 @@ impl Composer {
                 self.text.push(ch);
                 return Outcome::Invalid;
             }
-            // More letters after an undo mean a foreign word (`session`, `array`).
+            // After an undo the next letter decides: a foreign word keeps the raw
+            // keys (`session`, `array`, `offline`, `asss`); otherwise the word goes
+            // on from the text shown (`lis` + `t` → `list`).
             Mode::Undone if ch.is_ascii_alphabetic() => {
-                self.restore_raw();
+                if self.keeps_raw_after_undo(ch) {
+                    self.restore_raw();
+                } else {
+                    self.continue_shown(ch);
+                }
                 return Outcome::Invalid;
             }
             _ if !ch.is_ascii_alphabetic() => {
@@ -203,16 +242,16 @@ impl Composer {
         }
         match self.mode {
             Mode::Viet if self.tone_key_last => {
-                let mut keys: Vec<char> = self.raw.chars().collect();
+                let mut keys = self.typed_keys();
                 keys.pop();
                 self.replay(&keys);
-                keys.fill('\0');
+                wipe_chars(&mut keys);
             }
             Mode::Viet => self.pop_letter(),
             Mode::Undone => {
                 self.text.pop();
                 self.raw.pop();
-                let mut before = String::new();
+                let mut before = String::with_capacity(WORD_BYTES);
                 self.render_to(&mut before);
                 if before == self.text {
                     self.mode = Mode::Viet;
@@ -229,11 +268,12 @@ impl Composer {
                 self.raw.pop();
                 // The shortened raw keys may form a syllable again (`acf` → `ac`);
                 // take that state only when it shows the same text.
-                let keys: Vec<char> = self.raw.chars().collect();
+                let mut keys = self.typed_keys();
                 let mut again = Composer::new();
                 for &k in &keys {
                     again.push(k);
                 }
+                wipe_chars(&mut keys);
                 if again.text == self.text {
                     std::mem::swap(self, &mut again);
                 }
@@ -256,16 +296,49 @@ impl Composer {
         }
         if parse(&self.letters, self.tone).is_none() {
             // Not reachable for a valid prefix; keep the shown text exactly.
-            let mut shown = String::new();
+            let mut shown = String::with_capacity(WORD_BYTES);
             self.render_to(&mut shown);
-            self.raw.clear();
+            wipe_string(&mut self.raw);
             self.raw.push_str(&shown);
             wipe_string(&mut shown);
             self.restore_raw();
             return;
         }
-        self.resync_raw();
         self.render();
+        if !self.retype_without_last_key() {
+            self.resync_raw();
+        }
+    }
+
+    /// After a letter is taken back, keeps the keys the user typed for the
+    /// letters still shown when the last key alone made that letter: the keys
+    /// minus the last one must compose to exactly the text shown. The word end
+    /// then restores and looks up those keys (`usern` + BackSpace → `user`),
+    /// not the canonical ones of [`Composer::resync_raw`] (`uer`).
+    fn retype_without_last_key(&mut self) -> bool {
+        let mut keys = self.typed_keys();
+        keys.pop();
+        let mut again = Composer::new();
+        for &k in &keys {
+            again.push(k);
+        }
+        wipe_chars(&mut keys);
+        let same = again.mode == Mode::Viet && again.text == self.text;
+        if same {
+            // BackSpace after this takes a letter, as it would have here.
+            again.tone_key_last = false;
+            std::mem::swap(self, &mut again);
+        }
+        again.clear();
+        same
+    }
+
+    /// The keys as chars, in a buffer sized up front so it never reallocates
+    /// (a reallocation would free a copy of the keys without wiping it).
+    fn typed_keys(&self) -> Vec<char> {
+        let mut keys = Vec::with_capacity(self.raw.len());
+        keys.extend(self.raw.chars());
+        keys
     }
 
     fn replay(&mut self, keys: &[char]) {
@@ -337,18 +410,125 @@ impl Composer {
         self.raw.is_empty()
     }
 
+    /// What to commit at the end of the word, given the language of the
+    /// previous word in the same field. Does not change the composer;
+    /// [`Composer::text`] still returns what is shown. No allocation: the
+    /// result borrows the shown text or the raw keys, and the word lists are
+    /// searched only here.
+    ///
+    /// Vietnamese words (text differs from the keys):
+    /// - no vowel (`dd` → đ): the text, [`Lang::Vi`];
+    /// - not a complete syllable (`úe`, `tưo`, `ă`, `ươ`): the raw keys, [`Lang::En`];
+    /// - keys in the English list and text not in the Vietnamese list: the raw keys, [`Lang::En`];
+    /// - keys in the English list and text in the Vietnamese list: the raw keys
+    ///   with [`Lang::En`] when `prev` is [`Lang::En`], else the text with [`Lang::Vi`];
+    /// - otherwise the text, [`Lang::Vi`].
+    ///
+    /// Words whose text equals the keys commit unchanged. A common English word
+    /// that is rare in Vietnamese (`the`, `with`: the plain English list) gives
+    /// [`Lang::En`]; else a Vietnamese syllable that is not an English word
+    /// (`cho`, `anh`) gives [`Lang::Vi`]; any other (`to`, `can`, `ngh`) keeps
+    /// `prev`, since it says nothing about the language (D15). An all-caps word
+    /// of two or more letters (`AI`, `VIP`) keeps `prev` too (D19). An empty
+    /// word also keeps `prev`.
+    ///
+    /// Passthrough words (no syllable fits, or after an undo by repeat) commit
+    /// the text shown: [`Lang::Vi`] when it has a Vietnamese letter (`viêts`),
+    /// [`Lang::En`] when it has letters (`class`, `as` from `ass`), else `prev`.
+    /// One exception (D14): a word that ends in a tone-key undo, shows only
+    /// ASCII and whose keys are in the English list commits its keys with
+    /// [`Lang::En`] when `prev` is [`Lang::En`] (`the pass`, not `the pas`).
+    pub fn finish(&self, prev: Lang) -> Finished<'_> {
+        let text = self.text.as_str();
+        let raw = self.raw.as_str();
+        let keep = |lang| Finished { text, lang };
+        let restore = Finished {
+            text: raw,
+            lang: Lang::En,
+        };
+        if self.mode != Mode::Viet {
+            if prev == Lang::En && self.ends_in_tone_undo() && words::is_english(raw) {
+                return restore;
+            }
+            return keep(shown_lang(text, prev));
+        }
+        if text == raw {
+            let lang = if raw.is_empty() {
+                prev
+            } else if words::is_plain_english(raw) {
+                Lang::En
+            } else if raw.len() >= 2 && raw.bytes().all(|b| b.is_ascii_uppercase()) {
+                // An acronym (`AI`, `UI`, `VIP`) says nothing about the language (D19).
+                prev
+            } else if words::is_vietnamese(text) && !words::is_also_english(raw) {
+                Lang::Vi
+            } else {
+                prev
+            };
+            return keep(lang);
+        }
+        let Some(s) = parse(&self.letters, self.tone) else {
+            return restore;
+        };
+        if s.ns == self.letters.len() {
+            return keep(Lang::Vi);
+        }
+        if !is_complete(&self.letters, s) {
+            return restore;
+        }
+        if !words::is_english(raw) || (prev != Lang::En && words::is_vietnamese(text)) {
+            return keep(Lang::Vi);
+        }
+        restore
+    }
+
+    /// The word stopped right after an undo by repeat of a tone key (`pass`,
+    /// `less`) and shows only ASCII letters. In `Undone` the last key is the
+    /// literal one; of the keys that can undo (tone keys, `a e o w d`), only
+    /// tone keys are `s f r x j`. An undo put back at the tone's position
+    /// (`lists` → `list`) counts too, though the text does not end in the key.
+    fn ends_in_tone_undo(&self) -> bool {
+        self.mode == Mode::Undone
+            && self.text.is_ascii()
+            && self.raw.chars().last().is_some_and(|k| {
+                matches!(k.to_ascii_lowercase(), 's' | 'f' | 'r' | 'x' | 'j')
+                    && (self.undo_inserted || self.text.ends_with(k))
+            })
+    }
+
     /// Forgets the word, overwriting the buffers first (best effort, SEC-4).
     pub fn clear(&mut self) {
         wipe_string(&mut self.raw);
         wipe_string(&mut self.text);
-        self.letters.fill(Letter::BLANK);
-        self.letters.clear();
+        wipe_letters(&mut self.letters);
         self.tone = Tone::None;
         self.mode = Mode::Viet;
         self.tone_key_last = false;
         self.tone_at = 0;
         self.horn_at = None;
         self.undo_inserted = false;
+    }
+
+    /// `ch` is already in `raw`; the undone key is the one before it.
+    fn keeps_raw_after_undo(&self, ch: char) -> bool {
+        let mut keys = self.raw.chars().rev().skip(1);
+        let undone = keys.next().map(|k| k.to_ascii_lowercase());
+        let k = ch.to_ascii_lowercase();
+        // A mark undo (`ww`, `aaa`, `ddd`) always goes on from the shown text.
+        // Repeating the same key restores the raw keys (`www`, `aaaa`).
+        if matches!(undone, Some('a' | 'e' | 'o' | 'd' | 'w')) {
+            return Some(k) == undone;
+        }
+        // `l` / `r` form the clusters of `offline`, `offroad`.
+        is_raw_vowel_key(ch) || matches!(k, 'l' | 'r') || Some(k) == undone
+    }
+
+    /// Passthrough from the text shown, so BackSpace works on what is on screen.
+    fn continue_shown(&mut self, ch: char) {
+        self.text.push(ch);
+        wipe_string(&mut self.raw);
+        self.raw.push_str(&self.text);
+        self.enter_passthrough(Mode::Raw);
     }
 
     fn restore_raw(&mut self) {
@@ -362,8 +542,7 @@ impl Composer {
     fn enter_passthrough(&mut self, mode: Mode) {
         self.mode = mode;
         if mode == Mode::Raw {
-            self.letters.fill(Letter::BLANK);
-            self.letters.clear();
+            wipe_letters(&mut self.letters);
             self.tone = Tone::None;
         }
     }
@@ -440,7 +619,7 @@ impl Composer {
             return self.validated();
         }
         if let Some(i) = (s.ns..s.ne).rev().find(|&i| self.letters[i].ch == k) {
-            let mut trial = self.letters.clone();
+            let mut trial = self.trial_letters();
             trial[i].ch = hat;
             if self.try_letters(trial) {
                 return Step::Ok;
@@ -458,7 +637,13 @@ impl Composer {
     fn horn(&mut self, ch: char, s: Syllable) -> Step {
         let upper = ch.is_ascii_uppercase();
         let end = self.letters.len();
-        let nuc: Vec<char> = self.letters[s.ns..s.ne].iter().map(|l| l.ch).collect();
+        let mut buf = CharBuf::new(&self.letters[s.ns..s.ne]);
+        let step = self.horn_on(ch, upper, end, s, buf.chars());
+        buf.wipe();
+        step
+    }
+
+    fn horn_on(&mut self, ch: char, upper: bool, end: usize, s: Syllable, nuc: &[char]) -> Step {
         let at = |i: usize| s.ns + i;
 
         // u + o → ươ (spec: `uow` and `uwow` both give ươ).
@@ -466,7 +651,7 @@ impl Composer {
             .windows(2)
             .position(|w| base(w[0]) == 'u' && base(w[1]) == 'o')
         {
-            let mut trial = self.letters.clone();
+            let mut trial = self.trial_letters();
             trial[at(p)].ch = 'ư';
             trial[at(p + 1)].ch = 'ơ';
             let changed = trial[at(p)].ch != self.letters[at(p)].ch
@@ -484,7 +669,7 @@ impl Composer {
                 .map(|i| (i, 'ư')),
         ];
         for (i, to) in candidates.into_iter().flatten() {
-            let mut trial = self.letters.clone();
+            let mut trial = self.trial_letters();
             trial[at(i)].ch = to;
             if self.try_letters(trial) {
                 return Step::Ok;
@@ -498,12 +683,23 @@ impl Composer {
             } else {
                 self.horn_at.filter(|&p| p <= end)
             };
+            let mut literal = ch;
             for i in (s.ns..s.ne).rev() {
                 let l = &mut self.letters[i];
                 match l.ch {
                     'ư' if l.w_alone => {
                         if i + 1 == end {
-                            self.letters.remove(i);
+                            // The shown `w` keeps the case of the key it came from.
+                            if l.upper {
+                                literal = ch.to_ascii_uppercase();
+                            }
+                            // Rotate the dropped letter to the end and blank it, so no copy
+                            // stays past the end of the vector.
+                            self.letters[i..].rotate_left(1);
+                            if let Some(l) = self.letters.last_mut() {
+                                *l = Letter::BLANK;
+                            }
+                            self.letters.pop();
                         } else {
                             l.ch = 'w';
                         }
@@ -514,11 +710,11 @@ impl Composer {
                     _ => {}
                 }
             }
-            return Step::Literal(ch, at);
+            return Step::Literal(literal, at);
         }
 
         // A lone `w` is ư where a vowel can start (`tw`, `giw`).
-        let mut trial = self.letters.clone();
+        let mut trial = self.trial_letters();
         trial.push(Letter {
             ch: 'ư',
             upper,
@@ -531,13 +727,24 @@ impl Composer {
         self.validated()
     }
 
-    fn try_letters(&mut self, trial: Vec<Letter>) -> bool {
-        if parse(&trial, self.tone).is_some() {
-            self.letters = trial;
-            true
-        } else {
-            false
+    /// A copy of the letters to try a change on, with room for one more
+    /// letter, so pushing to it never reallocates and frees an unwiped copy.
+    fn trial_letters(&self) -> Vec<Letter> {
+        let mut trial = Vec::with_capacity(WORD_KEYS.max(self.letters.len() + 1));
+        trial.extend_from_slice(&self.letters);
+        trial
+    }
+
+    /// Takes `trial` when it is valid, copied into the composer's own buffer
+    /// so that buffer keeps its capacity; `trial` is wiped either way.
+    fn try_letters(&mut self, mut trial: Vec<Letter>) -> bool {
+        let ok = parse(&trial, self.tone).is_some();
+        if ok {
+            wipe_letters(&mut self.letters);
+            self.letters.extend_from_slice(&trial);
         }
+        wipe_letters(&mut trial);
+        ok
     }
 
     fn validated(&mut self) -> Step {
@@ -558,8 +765,10 @@ impl Composer {
     fn render_to(&self, out: &mut String) {
         let mark = match parse(&self.letters, self.tone) {
             Some(s) if self.tone != Tone::None && s.ns < s.ne => {
-                let nuc: Vec<char> = self.letters[s.ns..s.ne].iter().map(|l| l.ch).collect();
-                Some(s.ns + tone_index(&nuc, s.ne < self.letters.len()))
+                let mut nuc = CharBuf::new(&self.letters[s.ns..s.ne]);
+                let i = tone_index(nuc.chars(), s.ne < self.letters.len());
+                nuc.wipe();
+                Some(s.ns + i)
             }
             _ => None,
         };
@@ -578,10 +787,30 @@ impl Composer {
     }
 }
 
+/// Room for one word without reallocating: ime-core ends a word at
+/// `MAX_WORD_KEYS` (32) keys; a shown character takes at most 4 bytes.
+const WORD_KEYS: usize = 32;
+const WORD_BYTES: usize = WORD_KEYS * 4;
+
+/// Overwrites the letters before emptying the vector, keeping the allocation.
+/// `black_box` keeps the stores although the memory is not read again.
+fn wipe_letters(v: &mut Vec<Letter>) {
+    v.fill(Letter::BLANK);
+    std::hint::black_box(&mut *v);
+    v.clear();
+}
+
+/// Overwrites a copy of the keys before it is dropped.
+fn wipe_chars(v: &mut Vec<char>) {
+    v.fill('\0');
+    std::hint::black_box(&mut *v);
+}
+
 /// Overwrites a string's bytes before emptying it, keeping the allocation.
 fn wipe_string(s: &mut String) {
     let mut bytes = std::mem::take(s).into_bytes();
     bytes.fill(0);
+    std::hint::black_box(&mut bytes);
     bytes.clear();
     *s = String::from_utf8(bytes).unwrap_or_default();
 }
@@ -659,29 +888,110 @@ fn nucleus_ok(nuc: &[char], has_final: bool) -> bool {
     }
 }
 
+/// The letters (already a valid prefix, nucleus `s`) form a whole syllable:
+/// the nucleus is one that can end the word as it stands, without a final
+/// (OPEN) or before the final typed (CLOSED). Exact match, so a nucleus still
+/// waiting for a mark (`ue` → uê, `uo` → ươ) or for a final (`ă`, `â`, `ươ`)
+/// is not complete.
+fn is_complete(letters: &[Letter], s: Syllable) -> bool {
+    if s.ns >= s.ne {
+        return false;
+    }
+    let nuc = || letters[s.ns..s.ne].iter().map(|l| l.ch);
+    let exact = |p: &&str| p.chars().eq(nuc());
+    if s.ne < letters.len() {
+        CLOSED.iter().any(exact)
+    } else {
+        OPEN.iter().chain(OPEN_LONG.iter()).any(exact)
+    }
+}
+
+/// Language of a passthrough word from the text it shows.
+fn shown_lang(text: &str, prev: Lang) -> Lang {
+    if text.chars().any(|c| !c.is_ascii() && c.is_alphabetic()) {
+        Lang::Vi
+    } else if text.chars().any(|c| c.is_ascii_alphabetic()) {
+        Lang::En
+    } else {
+        prev
+    }
+}
+
+/// Longest run of letters [`parse`] looks at. A valid syllable has at most 8
+/// letters (`nghiêng` + one being tried); anything longer is not one.
+const MAX_LETTERS: usize = 16;
+
+/// The plain characters of some letters on the stack, so checking a word
+/// makes no heap copy of what was typed (SEC-4). Wiped by [`CharBuf::wipe`].
+struct CharBuf {
+    buf: [char; MAX_LETTERS],
+    len: usize,
+}
+
+impl CharBuf {
+    /// Takes at most [`MAX_LETTERS`] letters.
+    fn new(letters: &[Letter]) -> Self {
+        let mut buf = ['\0'; MAX_LETTERS];
+        let len = letters.len().min(MAX_LETTERS);
+        for (b, l) in buf.iter_mut().zip(letters) {
+            *b = l.ch;
+        }
+        Self { buf, len }
+    }
+
+    fn chars(&self) -> &[char] {
+        &self.buf[..self.len]
+    }
+
+    fn wipe(&mut self) {
+        self.buf.fill('\0');
+        std::hint::black_box(&mut self.buf);
+    }
+}
+
+/// `chars` spells `s`.
+fn spells(chars: &[char], s: &str) -> bool {
+    s.chars().eq(chars.iter().copied())
+}
+
 /// Validates letters as a Vietnamese syllable or a prefix of one.
 fn parse(letters: &[Letter], tone: Tone) -> Option<Syllable> {
-    let w: Vec<char> = letters.iter().map(|l| l.ch).collect();
+    if letters.len() > MAX_LETTERS {
+        return None;
+    }
+    let mut w = CharBuf::new(letters);
+    let res = parse_chars(w.chars(), tone);
+    w.wipe();
+    res
+}
+
+fn parse_chars(w: &[char], tone: Tone) -> Option<Syllable> {
     let n = w.len();
     let Some(fv) = w.iter().position(|&c| is_vowel(c)) else {
         let ok = w.iter().all(|c| c.is_ascii_lowercase() || *c == 'đ')
             && (w == ['q']
-                || INITIALS
-                    .iter()
-                    .any(|i| i.starts_with(&String::from_iter(&w)[..])));
+                || INITIALS.iter().any(|i| {
+                    let mut ic = i.chars();
+                    w.iter().all(|&c| ic.next() == Some(c))
+                }));
         return (ok && tone == Tone::None).then_some(Syllable { ns: n, ne: n });
     };
-    let cons: String = w[..fv].iter().collect();
-    let ns = match cons.as_str() {
-        "q" if w[fv] == 'u' => fv + 1,
-        "q" => return None,
-        "g" if w[fv] == 'i' && w.get(fv + 1).is_some_and(|&c| is_vowel(c)) => fv + 1,
-        c if INITIALS.contains(&c) => fv,
-        _ => return None,
+    let cons = &w[..fv];
+    let ns = if spells(cons, "q") {
+        if w[fv] != 'u' {
+            return None;
+        }
+        fv + 1
+    } else if spells(cons, "g") && w[fv] == 'i' && w.get(fv + 1).is_some_and(|&c| is_vowel(c)) {
+        fv + 1
+    } else if INITIALS.iter().any(|i| spells(cons, i)) {
+        fv
+    } else {
+        return None;
     };
     let ne = (ns..n).find(|&i| !is_vowel(w[i])).unwrap_or(n);
-    let fin: String = w[ne..].iter().collect();
-    if !FINALS.contains(&fin.as_str()) {
+    let fin = &w[ne..];
+    if !FINALS.iter().any(|f| spells(fin, f)) {
         return None;
     }
     let nuc = &w[ns..ne];
@@ -693,13 +1003,16 @@ fn parse(letters: &[Letter], tone: Tone) -> Option<Syllable> {
         return None;
     }
     let front = matches!(nuc[0], 'i' | 'y' | 'e' | 'ê');
-    let spelling_ok = match cons.as_str() {
-        "k" | "gh" | "ngh" => front,
-        "c" | "ng" => !front,
-        "g" if ns == fv => !matches!(nuc[0], 'e' | 'ê'),
-        _ => true,
+    let spelling_ok = if ["k", "gh", "ngh"].iter().any(|c| spells(cons, c)) {
+        front
+    } else if spells(cons, "c") || spells(cons, "ng") {
+        !front
+    } else if spells(cons, "g") && ns == fv {
+        !matches!(nuc[0], 'e' | 'ê')
+    } else {
+        true
     };
-    let stop_final = matches!(fin.as_str(), "c" | "ch" | "p" | "t");
+    let stop_final = ["c", "ch", "p", "t"].iter().any(|f| spells(fin, f));
     let tone_ok = !stop_final || matches!(tone, Tone::None | Tone::Sac | Tone::Nang);
     (spelling_ok && tone_ok).then_some(Syllable { ns, ne })
 }
@@ -738,4 +1051,69 @@ fn with_tone(c: char, tone: Tone) -> char {
         .iter()
         .find(|(v, _)| *v == c)
         .map_or(c, |(_, forms)| forms[tone.column()])
+}
+
+/// Keys that start or extend a vowel (`w` is the horn key).
+fn is_raw_vowel_key(ch: char) -> bool {
+    matches!(
+        ch.to_ascii_lowercase(),
+        'a' | 'e' | 'i' | 'o' | 'u' | 'y' | 'w'
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Buffers sized for a whole word: typing up to 32 keys, BackSpace and the
+    /// BackSpace replay never move them, so no freed copy of the word is left
+    /// behind (SEC-4).
+    /// Trial copies leave room for the letter a trial may add, at every size a
+    /// word reaches, and every trial site takes its copy from `trial_letters`.
+    #[test]
+    fn trial_letters_never_reallocate() {
+        let mut c = Composer::new();
+        for ch in "nghieeng".chars() {
+            c.push(ch);
+            let trial = c.trial_letters();
+            assert!(trial.capacity() > trial.len(), "no room after {ch}");
+        }
+        let mut c = Composer::new();
+        c.letters.extend((0..40).map(|_| Letter::new('b', false)));
+        let trial = c.trial_letters();
+        assert!(trial.capacity() > trial.len());
+        let exact_clone = concat!("letters", ".clone()");
+        assert!(
+            !include_str!("lib.rs").contains(exact_clone),
+            "a trial site clones the letters with exact capacity"
+        );
+    }
+
+    #[test]
+    fn word_buffers_never_reallocate() {
+        for keys in [
+            "nguwowif",
+            "nghieeengs",
+            "usern",
+            "vieetj",
+            "tuow",
+            "passport",
+            "abcdefghijklmnopqrstuvwxyzabcdef",
+            "đđđđđđđđđđđđđđđđđđđđđđđđđđđđđđđđ",
+        ] {
+            let mut c = Composer::new();
+            for (n, ch) in keys.chars().enumerate() {
+                c.push(ch);
+                if n % 3 == 2 {
+                    c.pop();
+                    c.push(ch);
+                }
+                // A replay swaps in a fresh composer of the same size; it must
+                // not have grown either.
+                assert!(c.raw.capacity() == WORD_BYTES, "{keys}: raw grew");
+                assert!(c.text.capacity() == WORD_BYTES, "{keys}: text grew");
+                assert!(c.letters.capacity() == WORD_KEYS, "{keys}: letters grew");
+            }
+        }
+    }
 }

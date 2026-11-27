@@ -502,14 +502,14 @@ fn several_clients_type_at_the_same_time_without_mixing() {
         shell.unasked(QUIET).await;
         qt.unasked(QUIET).await;
 
-        for (a, b) in "vieetj".chars().zip("dduowf".chars()) {
+        for (a, b) in "vieetj".chars().zip("dduwcs".chars()) {
             assert!(shell.tap(&shell_path, a as u32).await.handled());
             assert!(qt.tap(&qt_path, b as u32).await.handled());
         }
         let space = shell.key(&shell_path, KEY_SPACE, 0).await;
         assert_eq!(space.before, [Seen::Commit("việt".into()), hidden(Some(0))]);
         let space = qt.key(&qt_path, KEY_SPACE, 0).await;
-        assert_eq!(space.before, [Seen::Commit("đườ".into()), hidden(Some(0))]);
+        assert_eq!(space.before, [Seen::Commit("đức".into()), hidden(Some(0))]);
     });
 }
 

@@ -179,8 +179,57 @@ fn more_letters_after_undo_restore_raw() {
         ("session", "session"),
         ("array", "array"),
         ("password", "password"),
-        ("xooong", "xooong"),
+        ("xooong", "xoong"),
         ("asss", "asss"),
+    ]);
+}
+
+#[test]
+fn consonant_after_undo_continues_the_shown_text() {
+    check(&[
+        ("lisst", "list"),
+        ("tesst", "test"),
+        ("parrt", "part"),
+        ("nexxt", "next"),
+        ("soft", "soft"),
+        ("sofft", "soft"),
+        ("hajjt", "hajt"),
+        ("aaat", "aat"),
+        ("seeet", "seet"),
+        ("booot", "boot"),
+        ("tawwn", "tawn"),
+        ("uwwt", "uwt"),
+        ("towwn", "town"),
+        ("dddt", "ddt"),
+        ("ddds", "dds"),
+        ("offline", "offline"),
+        ("sorry", "sorry"),
+        ("cherry", "cherry"),
+    ]);
+}
+
+#[test]
+fn letters_after_a_mark_undo_continue_the_shown_text() {
+    check(&[
+        ("ww", "w"),
+        ("wwa", "wa"),
+        ("wwe", "we"),
+        ("www", "www"),
+        ("WWW", "WWW"),
+        ("aaaa", "aaaa"),
+        ("dddd", "dddd"),
+        ("WWa", "Wa"),
+        ("tuwswa", "túwa"),
+        ("ddda", "dda"),
+        ("aaai", "aai"),
+        ("eeea", "eea"),
+        ("oooa", "ooa"),
+        ("uwwa", "uwa"),
+        ("twwa", "twa"),
+        ("Wwa", "Wa"),
+        ("xooong", "xoong"),
+        ("dddt", "ddt"),
+        ("towwn", "town"),
     ]);
 }
 
@@ -312,11 +361,19 @@ fn backspace_after_undo_removes_last_shown_char() {
         ("ass<", "a"),
         ("aaa<", "a"),
         ("ddd<", "d"),
+        ("wwa<", "w"),
+        ("ddda<", "dd"),
+        ("ddd<d", "đ"),
+        ("www<", "ww"),
         ("ww<", ""),
         ("uww<", "u"),
         ("booss<", "bô"),
         ("booss<s", "bố"),
         ("ass<s", "á"),
+        ("lisst<", "lis"),
+        ("lisst<<", "li"),
+        ("lisst<t", "list"),
+        ("lisst<s", "liss"),
         ("vieet1<", "viêt"),
         ("vieet1<j", "việt"),
     ]);
