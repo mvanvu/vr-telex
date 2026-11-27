@@ -262,6 +262,21 @@ for action in "postinst configure" "postinst configure $DEB_VERSION" \
     ;;
   "postinst configure")
     check "$action points users to vr-telex-setup" grep -q "vr-telex-setup" "$TMP/script.out"
+    # Same wording as README and the setup: no logout needed to start typing.
+    check "$action says it works at once" grep -q "works at once" "$TMP/script.out"
+    check "$action says Qt/X11 apps follow after the next login" \
+      grep -q "Qt and X11 apps pick it up after the next login" "$TMP/script.out"
+    ;;
+  esac
+  case $action in
+  "postrm purge")
+    # What a user notices when the per-user setup was not undone first.
+    # shellcheck disable=SC2088 # a literal ~ in the message, not a path
+    for left in "input method settings still point at vr-telex" \
+      "~/.local/share/dbus-1/services/org.fcitx.Fcitx5.service" "~/.xinputrc" \
+      "~/.config/autostart/org.fcitx.Fcitx5.desktop" "enable link" "reinstall vr-telex"; do
+      check "$action names: $left" grep -qF -- "$left" "$TMP/script.out"
+    done
     ;;
   "prerm upgrade"* | "postrm upgrade"*)
     check "$action prints nothing" test ! -s "$TMP/script.out"

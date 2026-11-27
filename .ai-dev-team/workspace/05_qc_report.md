@@ -91,3 +91,60 @@ Engines: shell sandboxes only (stub systemctl/fake-ime), no browser needed. Noth
 | Flaky tests | none seen |
 
 QC_PASS A2
+
+## Sign-off (commit bfb5af7, clean tree apart from team files)
+Engines: shell sandboxes + cargo; no browser (no UI). Nothing installed, no sudo, real session and the apt gnupg dir untouched. Logs: qa-artifacts/signoff/.
+- cargo test --workspace --locked: 247 passed, 0 failed, 1 ignored (cargo_test.log)
+- cargo fmt --check + clippy --workspace --all-targets --locked -D warnings: clean (guard.log)
+- tests/install/run.sh: 57 scenarios, 0 failed (install.log)
+- VR_TELEX_DEB_STRICT=1 tests/deb/run.sh: PASS, no skip/fail lines (deb.log)
+- cargo deb -p vr-telex --locked -> vr-telex_0.1.0-1_amd64.deb; bash tests/apt/run.sh <that deb>: PASS (apt.log)
+- shellcheck: plain run only reports SC1091 info (common.sh not followed); with -x on all 6 files exit 0
+- YAML parse of release.yml, test.yml: ok
+
+| AC | Evidence | Result |
+|---|---|---|
+| AC-1 rename | git grep of vr-talex/VR_TALEX outside .ai-dev-team: only migration code/comments (install.sh, uninstall.sh, packaging/common.sh, vr-telex-setup), README migration note, tests/install fixtures (tests/install/legacy/**, named for the old install); no tracked path outside legacy fixtures is named talex; full suites green | ok |
+| AC-2 migration | tests/install 57/57 (legacy migrate, keep selection, idempotent, uninstall restore, setup_legacy_*) | ok |
+| AC-3 setup | tests/install setup_* scenarios (root refused, --remove, /usr/bin binary, packaged unit, no cargo, nothing in ~/.local/bin, from-source intact) | ok |
+| AC-4 deb | tests/deb strict PASS + cargo deb build of the real package; maintainer scripts leave HOME untouched | ok |
+| AC-5 apt repo | tests/apt/run.sh with the real deb PASS: signed InRelease/Release.gpg, apt update with keyring ok, tampered Packages/InRelease refused, build.sh guard cases | ok |
+| AC-6 CI | release.yml/test.yml parse; read: tag v*, pinned SHAs, top-level contents: read, contents: write only on the publish job, secret via env, unset after use, gh-pages publish | ok statically; live run unverified |
+| AC-7 README | read: apt keyring to /etc/apt/keyrings/vr-telex.gpg, signed-by line, apt install, vr-telex-setup, update, remove, from-source kept, vr-talex migration section | ok |
+| AC-8 machine install | leader does it afterwards | n-a |
+
+Unverified: live GitHub release workflow run (needs a push/tag); AC-8.
+
+## Rule check sign-off
+| Rule | Result |
+|---|---|
+| Every AC proven with evidence (AC-8 n-a) | pass |
+| Full suite run once at sign-off | pass |
+| No production edits, no install/sudo/real systemctl --user | pass |
+| Probe data cleanup (BASE-17) | n/a |
+| Flaky tests | none seen |
+
+QC_PASS
+
+## QC P5-1
+Engines: bash, shellcheck 0.9.0, python3 -I yaml, cargo-deb (qa-tools). No browser needed. Artifacts: .ai-dev-team/workspace/qa-artifacts/P5/ (apt.log, deb.log, install.log, poc2/).
+
+- AC-5: `run-heavy.sh bash tests/apt/run.sh` rc 0, 59 ok, PASS (includes the 10 new pool-vs-signed-index checks).
+- AC-5 PoC replay (new build.sh, throwaway key, pinned via APT_PINNED_KEY): two legit builds (1.0.0, 1.1.0) rc 0; planted vr-telex_9.9.9-1 in pool; third build rc 1:
+  `apt-repo: error: pool/main/v/vr-telex/vr-telex_9.9.9-1_amd64.deb: not listed in the signed index (dists/stable/InRelease); remove it from the site`
+  sha256 of every site file before vs after the refused run: identical (`SITE UNCHANGED`).
+- AC-4: `VR_TELEX_DEB_STRICT=1 tests/deb/run.sh` rc 0, 70 ok, 0 skip/fail, PASS (new postinst/postrm message asserts included).
+- AC-6 static: release.yml/test.yml parse (yaml.safe_load ok). Both shellcheck commands copied from the YAML and run as written: rc 0 and rc 0. ci-static-check.py: PASS. `bash tests/install/run.sh` (the workflow step) under `env -i` via run-heavy: rc 0, `--- 57 scenarios, 0 failed`. Live GitHub run unverified (needs push/tag).
+- AC-7: README Update/switch/remove text read against packaging/common.sh behaviour; setup_fresh, setup_from_source, install_after_setup PASS in the 57. Matches.
+- Minor note (not a defect): shellcheck of common.sh runs at -S warning with SC2034,SC2174 excluded (documented deviation; common.sh out of scope).
+
+## Rule check P5-1
+| Rule | Result |
+|---|---|
+| Related tests run (apt, deb strict, install once), no full cargo suite | pass |
+| No production edits, no install/sudo | pass |
+| Real key home /home/rainy/.local/share/vr-telex-apt-gnupg untouched (throwaway key copy only) | pass |
+| Probe data cleanup (BASE-17) | pass: planted deb removed, site diff identical |
+| Flaky tests | none |
+
+QC_PASS

@@ -6,10 +6,15 @@ set -e
 
 case "$1" in
 purge)
-  echo "vr-telex: per-user files are kept (~/.local/share/vr-telex," >&2
-  echo "vr-telex: ~/.local/state/vr-telex, ~/.config/environment.d/90-vr-telex.conf)." >&2
-  echo "vr-telex: To restore a user's input settings, reinstall vr-telex and run" >&2
-  echo "vr-telex: 'vr-telex-setup --remove' as that user before purging." >&2
+  echo "vr-telex: per-user files in home directories are kept. For a user who did not" >&2
+  echo "vr-telex: run 'vr-telex-setup --remove' first, the" >&2
+  echo "vr-telex: input method settings still point at vr-telex, so neither fcitx5" >&2
+  echo "vr-telex: nor Vietnamese input starts at login:" >&2
+  echo "vr-telex: ~/.local/share/dbus-1/services/org.fcitx.Fcitx5.service, ~/.xinputrc," >&2
+  echo "vr-telex: ~/.config/autostart/org.fcitx.Fcitx5.desktop and the vr-telex.service" >&2
+  echo "vr-telex: enable link in ~/.config/systemd/user. To restore that user's setup," >&2
+  echo "vr-telex: reinstall vr-telex, run 'vr-telex-setup --remove' as that user, then" >&2
+  echo "vr-telex: purge again. The saved setup is in ~/.local/share/vr-telex." >&2
   ;;
 esac
 

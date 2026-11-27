@@ -1,0 +1,27 @@
+[
+  {
+    "finding": "major: Release publishes vr-telex-setup and common.sh without ever running tests/install/run.sh (.github/workflows/release.yml:62)",
+    "status": "fixed",
+    "notes": "Both test.yml and the release build job now run `bash tests/install/run.sh` after cargo test, and in release.yml that step comes before the .deb is built. The package list covers what the sandbox uses: dbus-run-session and dbus-daemon (dbus-daemon, checked with dpkg -S); gdbus and gsettings (libglib2.0-bin); the org.gnome.desktop.input-sources schema (gsettings-desktop-schemas); and stubs/fake-ime (python3 is preinstalled on the runner; `import gi` needs python3-gi; Gio and GLib typelibs come from gir1.2-glib-2.0 on 24.04). The other stubs (systemctl, fcitx5, fcitx5-remote, broken-vr-telex) are bash/sh scripts using coreutils only. Nothing missing found. Shellcheck: shellcheck reports only the files named on the command line (sourced files need -a), so the separate common.sh line is what lints it. Running it at warning level with SC2034/SC2174 excluded is acceptable: both are known and harmless (SNAP_UNITS unused, mkdir -p -m on one path), and any other warning or error still fails CI. Leaving tests/install/run.sh out of shellcheck is acceptable: it is test code that CI runs in full. Suggestion only: add a follow-up task to remove SNAP_UNITS and split the mkdir, then drop the -e list."
+  },
+  {
+    "finding": "minor: The Update step restarts the unit but never runs vr-telex-setup or daemon-reload (README.md:52)",
+    "status": "fixed",
+    "notes": "Checked against common.sh for KIND=package with a manifest present (RERUN=1, so the first backup is kept). install_files sets CHANGED_UNIT=1, so daemon-reload runs (common.sh:1084, 1100-1101). install_managed rewrites 90-vr-telex.conf, ~/.xinputrc, the autostart override and the D-Bus service file. A copy the user edited since (dst differs from both the record and the source) goes through keep_user_copy (1061-1062). select_source calls reselect_source, which puts the source first in mru-sources (1174-1176, 1204-1219). start_daemon restarts the unit (1132-1134). Every claim in the new README text matches. Not stated there but already printed by on_exit: if that rerun fails its health check, the rollback restores the state from before the first install, so vr-telex is removed. Acceptable."
+  },
+  {
+    "finding": "minor: README tells users to uninstall first, but vr-telex-setup replaces a from-source install itself (README.md:88)",
+    "status": "fixed",
+    "notes": "Both directions now match the code. Package over source: retire_checkout_files removes the recorded binary and unit, moves an edited copy aside, and keeps the first backup (setup_from_source test). Source over package: install.sh writes its own unit to ~/.config/systemd/user, which takes priority over /usr/lib, and the backup is shared (install_after_setup test). The advice to run `sudo apt remove` afterwards is safe: the user unit in ~/.config and the wants link resolve by name."
+  },
+  {
+    "finding": "minor: postinst asks for a logout that the setup and the README say is not needed (packaging/deb/postinst:10)",
+    "status": "fixed",
+    "notes": "postinst, the README apt section and the README from-source section now all say 'It works at once; Qt and X11 apps pick it up after the next login'. postinst also says to run vr-telex-setup again after an upgrade, which matches the README Update step. postinst prints this on upgrades too (configure <old-version>), which is where that last line matters. tests/deb/run.sh asserts both phrases. The phrase 'works at once' and the Qt line are each on a single output line, so the grep -q checks match."
+  },
+  {
+    "finding": "minor: The purge message leaves out the per-user files that keep fcitx5 from starting (packaging/deb/postrm:9)",
+    "status": "fixed",
+    "notes": "postrm purge now states the effect (neither fcitx5 nor Vietnamese input starts at login), names the D-Bus service file, ~/.xinputrc, the autostart override and the enable link, and gives the recovery (reinstall, run --remove, purge again). tests/deb/run.sh checks each item with grep -F. The existing checks still hold: purge mentions vr-telex-setup --remove, and upgrade actions print nothing."
+  }
+]

@@ -83,6 +83,10 @@ new_key() { # new_key <gnupghome> <passphrase or empty>; prints the fingerprint
 FPR=$(new_key "$KEYS" "$PASSPHRASE")
 OTHER_FPR=$(new_key "$OTHER_KEYS" "")
 if [ -z "$FPR" ] || [ -z "$OTHER_FPR" ]; then die "could not generate throwaway keys"; fi
+# build.sh checks the published site against a pinned public key (by default
+# the committed packaging/apt/vr-telex.asc); here it is the throwaway one.
+PINNED="$TMP/pinned.asc"
+GNUPGHOME=$KEYS gpg --batch --armor --export "$FPR" >"$PINNED"
 
 # --- stand-in packages ------------------------------------------------------
 fake_deb() { # fake_deb <version> <package> <out-file>
@@ -109,11 +113,11 @@ else
 fi
 
 OUT="$TMP/site"
-build() { # build <log> <deb>...; runs build.sh with the throwaway key
+build() { # build <log> <deb>...; runs build.sh with the throwaway key on $SITE (default $OUT)
   local log=$1
   shift
-  APT_GPG_KEY=$FPR APT_GPG_PASSPHRASE=$PASSPHRASE GNUPGHOME=$KEYS \
-    bash "$BUILD" "$@" "$OUT" >"$log" 2>&1
+  APT_GPG_KEY=$FPR APT_GPG_PASSPHRASE=$PASSPHRASE GNUPGHOME=$KEYS APT_PINNED_KEY=$PINNED \
+    bash "$BUILD" "$@" "${SITE:-$OUT}" >"$log" 2>&1
 }
 
 # --- build: first release, then a second one over the same site -----------
@@ -276,7 +280,7 @@ build_refused() { # build_refused <log> <reason pattern> <deb>...: fails, says w
 build_env_refused() { # build_env_refused <env assignments...>: build.sh fails, site unchanged
   local before
   before=$(site_state)
-  ! env "$@" timeout 60 bash "$BUILD" "$OLD_DEB" "$OUT" </dev/null >"$TMP/build-env.log" 2>&1 &&
+  ! env "$@" APT_PINNED_KEY="$PINNED" timeout 60 bash "$BUILD" "$OLD_DEB" "$OUT" </dev/null >"$TMP/build-env.log" 2>&1 &&
     [ "$(site_state)" = "$before" ]
 }
 
@@ -302,6 +306,83 @@ check "build.sh refuses a package that is not vr-telex (site unchanged)" \
 cp "$NEW_DEB" "$TMP/debs2/${PKG}_9.9.9-1_amd64.deb"
 check "build.sh refuses a file name that does not match the version (site unchanged)" \
   build_refused "$TMP/build-badname.log" 'does not match Version' "$TMP/debs2/${PKG}_9.9.9-1_amd64.deb"
+
+# --- the pool must be what the published, signed index lists -----------------
+# build.sh re-signs everything under pool/, so a file planted on the site
+# (gh-pages) would otherwise become a signed update at the next release.
+PKGS_FILE="$OUT/dists/stable/main/binary-amd64/Packages"
+INREL="$OUT/dists/stable/InRelease"
+NEXT_DEB="$TMP/debs3/${PKG}_0.0.4-1_amd64.deb"
+EVIL_DEB="$TMP/debs3/${PKG}_9.9.9-1_amd64.deb"
+fake_deb 0.0.4-1 "$PKG" "$NEXT_DEB"
+fake_deb 9.9.9-1 "$PKG" "$EVIL_DEB"
+cp -a "$OUT" "$TMP/site.good"
+restore_site() { rm -rf -- "$OUT" && cp -a "$TMP/site.good" "$OUT"; }
+
+cp "$EVIL_DEB" "$OUT/$POOL/"
+check "build.sh refuses a pool file the signed Packages does not list (site unchanged)" \
+  build_refused "$TMP/build-planted.log" 'not listed in the signed index' "$NEXT_DEB"
+restore_site
+
+mkdir -p "$OUT/pool/main/x/evil"
+printf 'x\n' >"$OUT/pool/main/x/evil/notes.txt"
+check "build.sh refuses an unlisted file of any name and depth under pool/ (site unchanged)" \
+  build_refused "$TMP/build-planted-deep.log" 'pool/main/x/evil/notes.txt: not listed in the signed index' "$NEXT_DEB"
+restore_site
+
+cp "$TMP/debs2/${PKG}_${OLD_VER}_amd64.deb" "$OUT/$POOL/${PKG}_${OLD_VER}_amd64.deb"
+check "build.sh refuses a listed pool file whose content was swapped (site unchanged)" \
+  build_refused "$TMP/build-swapped.log" 'does not match the signed index' "$NEXT_DEB"
+restore_site
+
+ln -s "$EVIL_DEB" "$OUT/$POOL/${PKG}_9.9.9-1_amd64.deb"
+check "build.sh refuses a symlink under pool/ (site unchanged)" \
+  build_refused "$TMP/build-symlink.log" 'not a regular file' "$NEXT_DEB"
+restore_site
+
+# The attacker also adds the planted file to Packages; InRelease still
+# holds the old hash of Packages.
+cp "$EVIL_DEB" "$OUT/$POOL/"
+(cd "$OUT" && apt-ftparchive packages pool/main >"$PKGS_FILE")
+check "build.sh refuses a Packages that does not match the signed InRelease (site unchanged)" \
+  build_refused "$TMP/build-packages.log" 'Packages does not match the signed InRelease' "$NEXT_DEB"
+# ... and re-signs InRelease with a key of their own.
+(cd "$OUT" && apt-ftparchive release dists/stable >"$TMP/forged.Release")
+GNUPGHOME=$OTHER_KEYS gpg --batch --yes --pinentry-mode loopback --passphrase '' \
+  --clearsign --output "$INREL" "$TMP/forged.Release" 2>/dev/null
+check "build.sh refuses an InRelease not signed by the pinned key (site unchanged)" \
+  build_refused "$TMP/build-forged.log" 'does not verify with the pinned key' "$NEXT_DEB"
+restore_site
+
+rm -f -- "$INREL"
+check "build.sh refuses a non-empty pool without InRelease (site unchanged)" \
+  build_refused "$TMP/build-noinrelease.log" 'no signed InRelease' "$NEXT_DEB"
+SITE="$TMP/site.boot"
+cp -a "$OUT" "$SITE"
+cp "$EVIL_DEB" "$SITE/$POOL/"
+bootstrap_build() { APT_REPO_BOOTSTRAP=1 build "$@"; }
+check "APT_REPO_BOOTSTRAP=1 re-signs a pool without InRelease (deliberate bootstrap)" \
+  bootstrap_build "$TMP/build-boot.log" "$NEXT_DEB"
+unset SITE
+restore_site
+
+mkdir -p "$OUT/dists/stable/main/binary-i386"
+cp "$PKGS_FILE" "$OUT/dists/stable/main/binary-i386/Packages"
+check "a rerun over the site with an extra file under dists/ succeeds" build "$TMP/build-extra-dists.log" "$OLD_DEB"
+extra_dists_gone() { [ ! -e "$OUT/dists/stable/main/binary-i386" ] && ! grep -q binary-i386 "$OUT/dists/stable/Release"; }
+check "  ... and the extra dists/ file is gone, not signed" extra_dists_gone
+restore_site
+
+signing_key_not_pinned() {
+  local before
+  before=$(site_state)
+  ! APT_GPG_KEY=$OTHER_FPR GNUPGHOME=$OTHER_KEYS APT_PINNED_KEY=$PINNED \
+    bash "$BUILD" "$NEXT_DEB" "$OUT" >"$TMP/build-unpinned.log" 2>&1 &&
+    grep -q 'is not the pinned key' "$TMP/build-unpinned.log" && [ "$(site_state)" = "$before" ]
+}
+check "build.sh refuses to sign with a key that is not the pinned one (site unchanged)" signing_key_not_pinned
+check "the site checked against the signed index takes the next version" build "$TMP/build-next.log" "$NEXT_DEB"
+
 check "build.sh without APT_GPG_KEY fails (site unchanged)" \
   build_env_refused -u APT_GPG_KEY GNUPGHOME="$KEYS" APT_GPG_PASSPHRASE="$PASSPHRASE"
 check "build.sh with a key that is not in GNUPGHOME fails (site unchanged)" \

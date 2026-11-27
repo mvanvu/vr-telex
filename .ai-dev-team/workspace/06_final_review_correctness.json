@@ -1,0 +1,42 @@
+[
+  {
+    "severity": "major",
+    "file": ".github/workflows/release.yml",
+    "line": 62,
+    "title": "Release publishes vr-telex-setup and common.sh without ever running tests/install/run.sh",
+    "scenario": "A change to packaging/common.sh breaks a vr-telex-setup path, for example retire_checkout_files or migrate_live. Then push tag vX.Y.Z. The build job runs cargo test, tests/deb/run.sh (it only compares files byte for byte) and tests/apt/run.sh. None of them runs the 57 sandbox scenarios, the setup_* and legacy_* ones included. test.yml does not run them either, and it shellchecks only tools/apt-repo/build.sh and tests/apt/run.sh. The signed .deb reaches every apt user, and the regression shows up only when each user runs vr-telex-setup on a live session.",
+    "fix": "In the release build job, and in test.yml, add a step `bash tests/install/run.sh` after `cargo test`. Install its dependencies first: dbus-daemon is already there; add gsettings-desktop-schemas, libglib2.0-bin and python3 if the stubs need them. Also add packaging/common.sh, packaging/vr-telex-setup, install.sh, uninstall.sh and packaging/deb/{postinst,prerm,postrm} to the shellcheck line."
+  },
+  {
+    "severity": "minor",
+    "file": "README.md",
+    "line": 52,
+    "title": "The Update step restarts the unit but never runs vr-telex-setup or daemon-reload",
+    "scenario": "A later release changes /usr/lib/systemd/user/vr-telex.service or a template in /usr/share/vr-telex: 90-vr-telex.conf, xinputrc, org.fcitx.Fcitx5.*. The user runs `sudo apt upgrade`, then `systemctl --user restart vr-telex.service` as the README says. systemd warns that the unit file changed on disk and restarts with the old definition that is still loaded. The per-user copies that vr-telex-setup wrote keep the old content after every login, because nothing rewrites them. Running vr-telex-setup again would fix both (it does daemon-reload, rewrites the recorded files and restarts the unit), but the README never says to run it.",
+    "fix": "Change Update to: `sudo apt update && sudo apt upgrade`, then run `vr-telex-setup` again as your user. That reloads the user manager, refreshes your files and restarts vr-telex. Or at least add `systemctl --user daemon-reload` before the restart."
+  },
+  {
+    "severity": "minor",
+    "file": "README.md",
+    "line": 88,
+    "title": "README tells users to uninstall first, but vr-telex-setup replaces a from-source install itself",
+    "scenario": "The README says: run ./uninstall.sh before switching to the apt package. The packaged code does the switch itself. vr-telex-setup (header lines 10-11) and common.sh retire_checkout_files (lines 963-986) take over a from-source install, keep the first backup, and have the setup_from_source test. A user who reads only the README tears down a working setup (fcitx5 comes back, the input sources are restored) for no reason. A user who reads the script header gets the opposite advice. The documented contract and the real behaviour disagree.",
+    "fix": "Make the README say what the code does: `vr-telex-setup` replaces a from-source install of the same user, and the backup from the first install is kept. To go back to from source, run `vr-telex-setup --remove` first, or run ./install.sh directly (install_after_setup covers that)."
+  },
+  {
+    "severity": "minor",
+    "file": "packaging/deb/postinst",
+    "line": 10,
+    "title": "postinst asks for a logout that the setup and the README say is not needed",
+    "scenario": "After `apt install vr-telex`, dpkg prints 'run vr-telex-setup ... then logging out and back in'. vr-telex-setup (install_main) starts the daemon, selects Vietnamese (Telex) at once and says 'installed; the top bar shows vi or en'. The README says 'no logout'. A logout only matters for the environment.d variables (Qt and XIM apps). Users get two different instructions from the same release.",
+    "fix": "Use one wording in all three places, for example: 'run vr-telex-setup as yourself; it works at once, and Qt/X11 apps pick it up after your next login'."
+  },
+  {
+    "severity": "minor",
+    "file": "packaging/deb/postrm",
+    "line": 9,
+    "title": "The purge message leaves out the per-user files that keep fcitx5 from starting",
+    "scenario": "A user runs `apt purge vr-telex` without `vr-telex-setup --remove`. postrm lists only ~/.local/share/vr-telex, ~/.local/state/vr-telex and 90-vr-telex.conf as kept. Also left behind: ~/.local/share/dbus-1/services/org.fcitx.Fcitx5.service, which shadows fcitx5 with Exec=/usr/bin/vr-telex (now missing); ~/.xinputrc; the autostart override; and the dangling enable link. Together they mean no input method at all after the next login. A user who reads only the purge message thinks it is only state data.",
+    "fix": "Say what the user will notice: 'your input method settings still point at vr-telex (no fcitx5, no Vietnamese input) until you reinstall vr-telex and run vr-telex-setup --remove'. Or list the D-Bus service file and ~/.xinputrc too."
+  }
+]

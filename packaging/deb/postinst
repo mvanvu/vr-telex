@@ -6,8 +6,10 @@ set -e
 
 case "$1" in
 configure)
-  echo "vr-telex: installed. Each user enables it by running 'vr-telex-setup'"
-  echo "vr-telex: as themselves (not root), then logging out and back in."
+  echo "vr-telex: installed. Each user turns it on by running 'vr-telex-setup' as"
+  echo "vr-telex: themselves (not root). It works at once;"
+  echo "vr-telex: Qt and X11 apps pick it up after the next login."
+  echo "vr-telex: After an upgrade, each user runs 'vr-telex-setup' again."
   ;;
 esac
 

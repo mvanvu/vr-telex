@@ -47,12 +47,18 @@ The package installs files system-wide (`/usr/bin/vr-telex`, `/usr/bin/vr-telex-
 the `vr-telex.service` user unit) and does not touch running sessions. `vr-telex-setup`
 does the per-user part, as your own user without `sudo`: it starts `vr-telex.service`,
 sets the input sources and saves the previous setup, as `./install.sh` does below. Each
-user who wants vr-telex runs it once.
+user who wants vr-telex runs it once. It works at once; Qt and X11 apps pick it up after the
+next login.
 
-**Update:** `sudo apt update && sudo apt upgrade`, then
-`systemctl --user restart vr-telex.service` to run the new version now (otherwise it starts
-at the next login). If `apt update` reports `EXPKEYSIG` for vr-telex, the repository key was
-renewed: run the first block above again (same fingerprint, so the check still passes).
+**Update:** `sudo apt update && sudo apt upgrade`, then run `vr-telex-setup` again as your
+user. It reloads your systemd user manager (so a changed `vr-telex.service` is loaded),
+writes the per-user files again from the new package (`~/.config/environment.d/90-vr-telex.conf`,
+`~/.xinputrc`, the fcitx5 autostart override and D-Bus service file; a copy you edited since
+is moved aside, not overwritten), keeps the backup from the first run, puts Vietnamese
+(Telex) first again and restarts vr-telex on the new version. Without it the new version
+starts only at the next login, and those files keep their old content. If `apt update`
+reports `EXPKEYSIG` for vr-telex, the repository key was renewed: run the first block above
+again (same fingerprint, so the check still passes).
 
 **Remove:** first undo the per-user setup while the package is still installed, then remove
 the package:
@@ -73,7 +79,8 @@ cd vr-telex
 ./install.sh
 ```
 
-Run it as your own user: no `sudo`, no logout. It:
+Run it as your own user, without `sudo`. It works at once; Qt and X11 apps pick it up
+after the next login. It:
 
 1. builds the release binary (`cargo build --release --locked`);
 2. installs it to `~/.local/bin/vr-telex` and starts the `vr-telex.service` systemd user
@@ -85,8 +92,15 @@ Run it as your own user: no `sudo`, no logout. It:
 
 If the daemon does not come up healthy, install rolls everything back and exits
 non-zero. Running it again changes no file; it only restarts the daemon (about 1 s).
-Use one install kind per user: run `./uninstall.sh` before switching to the apt package,
-or `vr-telex-setup --remove` before switching back.
+One install kind per user is active at a time, and switching needs no uninstall first:
+
+- From source to the apt package: install the package and run `vr-telex-setup`. It
+  replaces the from-source install (its `~/.local/bin/vr-telex` and user unit go; a copy
+  you edited is moved aside) and keeps the backup from the first install, so
+  `vr-telex-setup --remove` still restores the setup from before vr-telex.
+- From the apt package back to source: run `./install.sh`. It takes over with its own
+  binary and unit and keeps the same backup, so `./uninstall.sh` restores the setup from
+  before either; then `sudo apt remove vr-telex` if you no longer want the package.
 
 ### Upgrading from vr-talex
 

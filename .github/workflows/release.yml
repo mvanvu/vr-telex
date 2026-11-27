@@ -4,9 +4,13 @@ name: release
 # repository on the gh-pages branch (older versions stay in the pool) and
 # attach it to the GitHub Release.
 #
-# Needs the repository secret APT_GPG_PRIVATE_KEY (armored secret key whose
-# fingerprint matches packaging/apt/vr-telex.asc) and, if that key has one,
-# APT_GPG_PASSPHRASE. GitHub Pages serves the gh-pages branch (root).
+# Needs the secret APT_GPG_PRIVATE_KEY (armored secret key whose fingerprint
+# matches packaging/apt/vr-telex.asc) and, if that key has one,
+# APT_GPG_PASSPHRASE, both in the GitHub environment apt-release: only the
+# publish job names that environment, so no other job or workflow can read
+# them, and the environment rules (v* tags, owner review) gate the publish.
+# A tag whose commit is not on master is refused before anything is built.
+# GitHub Pages serves the gh-pages branch (root). Setup: tools/apt-repo/README.md.
 
 on:
   push:
@@ -29,11 +33,24 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+          fetch-depth: 0
 
+      - name: Refuse a tag that is not on master
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/master ||
+            { echo "::error::tag $TAG points at $GITHUB_SHA, which is not on master"; exit 1; }
+
+      # libglib2.0-bin, gsettings-desktop-schemas, python3-gi and gir1.2-glib-2.0:
+      # tests/install/run.sh (see test.yml).
       - name: Install tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends apt-utils dbus-daemon gpg gpgv shellcheck
+          sudo apt-get install -y -q --no-install-recommends apt-utils dbus-daemon gpg gpgv shellcheck \
+            libglib2.0-bin gsettings-desktop-schemas python3-gi gir1.2-glib-2.0
           rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update
           cargo install cargo-deb --locked --version 3.8.0
 
@@ -41,7 +58,13 @@ jobs:
         run: |
           cargo fmt --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
+          shellcheck -x tools/apt-repo/build.sh tests/apt/run.sh tests/deb/run.sh install.sh uninstall.sh \
+            packaging/vr-telex-setup packaging/deb/postinst packaging/deb/prerm packaging/deb/postrm
+          shellcheck -x -S warning -e SC2034,SC2174 packaging/common.sh # see test.yml
           cargo test --workspace --locked
+
+      - name: Install and setup scenarios
+        run: bash tests/install/run.sh
 
       - name: Build the .deb
         id: deb
@@ -76,6 +99,9 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-24.04
+    # Secrets come from this environment only; its rules allow v* tags and
+    # need the owner's approval.
+    environment: apt-release
     timeout-minutes: 15
     permissions:
       contents: write # push gh-pages, create the release
@@ -93,7 +119,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends apt-utils gpg
+          sudo apt-get install -y -q --no-install-recommends apt-utils gpg gpgv
 
       # Never add `set -x` or echo the key variables in this step.
       - name: Sign and publish the apt repository (gh-pages)

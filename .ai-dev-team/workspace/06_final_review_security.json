@@ -1,0 +1,18 @@
+[
+  {
+    "severity": "major",
+    "file": "tools/apt-repo/build.sh",
+    "line": 293,
+    "title": "CWE-345 Re-signing trusts whatever is already on gh-pages: a planted .deb in the pool becomes a signed, root-installed update",
+    "scenario": "release.yml:125-131 checks out the published gh-pages branch and build.sh indexes every file under pool/main (apt-ftparchive packages \"pool/$COMPONENT\") and then signs Release/InRelease with the release key. Only the new input .deb is checked (name, control fields, no-overwrite). Nothing checks the files that were already in the pool against the previously signed Packages index. Anyone who can push to gh-pages without a tag release can add pool/main/v/vr-telex/vr-telex_9.9.9-1_amd64.deb with a malicious postinst. That covers a stolen or over-scoped token, any future workflow with contents: write, or a compromised action in such a job. Until the next tag the file is inert, because the signed Packages does not list it. The next legitimate release then puts it into Packages and signs it. Users' 'apt upgrade' installs 9.9.9 and its postinst runs as root on every machine. This turns write access to an unsigned storage branch into the signing key's guarantee, so the separate key adds no protection against a gh-pages compromise.",
+    "fix": "Before indexing in build.sh, if dists/stable/InRelease exists, verify it with gpgv --keyring <pinned packaging/apt/vr-telex.gpg> (refuse if the signature is bad). Take SHA256 and Filename of every entry in the verified Packages. Refuse to run if any file under pool/ is not listed there with a matching hash, apart from the new input debs. If the pool is not empty and no InRelease exists, refuse too (or require an explicit bootstrap flag). Optionally also refuse when the gh-pages tip commit was not made by github-actions[bot]."
+  },
+  {
+    "severity": "minor",
+    "file": ".github/workflows/release.yml",
+    "line": 101,
+    "title": "CWE-284 The signing key is a repository-wide secret and publish runs for any v* tag on any commit with no gate",
+    "scenario": "APT_GPG_PRIVATE_KEY is a plain repository secret, which is what tools/apt-repo/README.md:36 'gh secret set ... --repo' creates. Any workflow file on any branch pushed to the repository can read it. Someone with write access (a collaborator, a leaked PAT or deploy key with workflow scope) pushes a branch whose workflow runs on push and pipes the secret anywhere. Then they can sign a repository of their own that every user's apt trusts (signed-by is only this key). Separately, on: push: tags: ['v*'] publishes a tag on any commit, including one never reviewed or merged to master, straight to gh-pages and all apt users. Fork PRs are correctly excluded: test.yml uses pull_request, has no secrets and has contents: read. So this applies only to holders of write access. That is why it is minor for a single-owner repository and grows with every collaborator or token.",
+    "fix": "Store the key and passphrase as secrets of a GitHub environment (e.g. 'apt-release') whose deployment rule allows only tags matching v*, with the owner as required reviewer. Set 'environment: apt-release' on the publish job only, and update the gh secret set command to use --env apt-release. Add a tag ruleset that allows only the owner to create v* tags. In the build job, refuse a tag whose commit is not on master: git fetch origin master && git merge-base --is-ancestor \"$GITHUB_SHA\" origin/master, which needs fetch-depth: 0 or a fetch of master."
+  }
+]

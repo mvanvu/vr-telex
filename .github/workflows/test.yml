@@ -21,21 +21,34 @@ jobs:
         with:
           persist-credentials: false
 
+      # tests/install/run.sh needs dbus-run-session (dbus-daemon), gsettings and
+      # gdbus (libglib2.0-bin), the org.gnome.desktop.input-sources schema
+      # (gsettings-desktop-schemas) and python3 with GLib introspection for
+      # its stand-in daemons (python3-gi, gir1.2-glib-2.0).
       - name: Install tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends apt-utils dbus-daemon gpg gpgv shellcheck
+          sudo apt-get install -y -q --no-install-recommends apt-utils dbus-daemon gpg gpgv shellcheck \
+            libglib2.0-bin gsettings-desktop-schemas python3-gi gir1.2-glib-2.0
           rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update
 
+      # packaging/common.sh is also followed (-x) from install.sh, uninstall.sh
+      # and vr-telex-setup. Checked on its own it still has style notes (info)
+      # and two known warnings (SC2034 SNAP_UNITS unused, SC2174 mkdir -p -m),
+      # so it runs at warning level with those two excluded until they are fixed.
       - name: Format and lint
         run: |
           cargo fmt --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
+          shellcheck -x tools/apt-repo/build.sh tests/apt/run.sh tests/deb/run.sh install.sh uninstall.sh \
+            packaging/vr-telex-setup packaging/deb/postinst packaging/deb/prerm packaging/deb/postrm
+          shellcheck -x -S warning -e SC2034,SC2174 packaging/common.sh
 
       - name: Unit and integration tests
         run: cargo test --workspace --locked
 
+      - name: Install and setup scenarios
+        run: bash tests/install/run.sh
+
       - name: Apt repository test
-        run: |
-          shellcheck tools/apt-repo/build.sh tests/apt/run.sh
-          bash tests/apt/run.sh
+        run: bash tests/apt/run.sh

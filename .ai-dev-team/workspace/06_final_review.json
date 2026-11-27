@@ -1,0 +1,5 @@
+{"run": "APT", "commit": "bfb5af7", "mode": "feature", "dimensions": ["correctness", "security"], "unattended": true,
+ "files": ["06_final_review_correctness.json", "06_final_review_security.json"],
+ "confirmed": ["correctness major: CI never runs tests/install/run.sh (leader grep of .github/workflows confirms)", "security: re-signing trusts planted pool files (PoC confirmed, rated low)"],
+ "minor": ["README Update step lacks vr-telex-setup/daemon-reload", "README says uninstall first though setup retires a from-source install", "postinst asks for logout", "postrm purge message incomplete", "signing secret repo-wide, tag on any commit"],
+ "uncertain": [], "missingDimensions": []}

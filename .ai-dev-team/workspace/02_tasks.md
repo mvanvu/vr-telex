@@ -7,6 +7,7 @@
 | A3 | Debian package via cargo-deb: metadata, maintainer scripts, contents/control test | be | A1 (A2 relaxed: asset paths fixed by the plan) | - | AC-4 | crates/vr-telex/Cargo.toml ([package.metadata.deb] only), packaging/deb/**, tests/deb/** | tests/deb/run.sh | done | 0 |
 | A4 | Signed apt repo script + local apt test + release workflow + README apt section | be | A3 (relaxed: consumes only the .deb file name vr-telex_*_amd64.deb and tests/deb/run.sh VR_TELEX_DEB_STRICT; no edits to A3 files) | security | AC-5, AC-6, AC-7 | tools/apt-repo/**, .github/workflows/**, tests/apt/**, README.md (install section) | tests/apt/run.sh | done | 1 |
 | M1 | Resolve the merge conflict in crates/telex-core/src/lib.rs (merge of origin/master 40c3f02 into local master): keep local 311dbe0 (tone undo at the tone position) and remote 32bb402 + EN-DETECT (mark undo continues the shown text, word-end language decision); both sides' tests green | be | - | - | AC-1 (old run), D37, D39, D40 | crates/telex-core/src/lib.rs only | cargo test -p telex-core --locked, cargo test -p ime-core --locked, guard | done | 0 |
+| P5-1 | Phase 5 fixes: CI runs install scenarios + wider shellcheck; build.sh verifies existing pool against signed InRelease; publish job via environment + tag must be on master; README Update/switch wording; postinst/postrm messages | be | A1-A4 | security | AC-2, AC-3, AC-4, AC-5, AC-6, AC-7 | .github/workflows/**, tools/apt-repo/**, tests/apt/**, README.md, packaging/deb/postinst, packaging/deb/postrm, tests/deb/run.sh (message asserts only) | tests/apt/run.sh, tests/deb/run.sh, guard | done | 0 |
 
 ## Notes
 presence: away (user, 17:47)
@@ -21,7 +22,7 @@ resume 17:32 (this machine, plugin 1.0.43, TEAM_BIN=/home/rainy/.claude/plugins/
 M1 model: opus (reason: semantic merge of two interacting undo fixes in the engine, not a marker removal).
 A1 overlap: local abac0f3 already renamed vr-talex → vr-telex with migration and tests/install scenarios, and the live machine was migrated (AC-1, AC-2, AC-8 part). Proposed to the user: A1 becomes a verification of AC-1/AC-2 on the merged tree plus the leftovers only.
 monitor: on (user, 17:30), plugin_src /home/rainy/DEV/ai-dev-team
-monitor-last: 18:02 (1 plugin finding: guard matches words inside data — apply agent spawned; 1 note)
+monitor-last: 18:27 (0 findings, 4 notes)
 M1 DONE gate 17:35: no markers, rule table present, guard clean, telex-core 64 + ime-core 69 tests pass; one change outside the hunks (ends_in_tone_undo uses undo_inserted). Reviewer: sonnet (engine logic, not high-risk).
 M1 verdict gate 17:36: sonnet REVIEW_PASS, rule check table present, 1 minor (BackSpace in Undone resets raw; no visible effect) for the report. M1 done; merge committed locally (commits: local, no push).
 A1 decision 17:47 (user): shrink A1 to verification of AC-1/AC-2 on the merged tree + leftovers.
@@ -29,7 +30,7 @@ answers 17:48 (user, before leaving): AC-8 install on this machine when done —
 tools 17:48: cargo-deb 3.8.0 in /home/rainy/.local/state/ai-dev-team/qa-tools/cargo-deb/bin; dpkg-deb, apt-ftparchive, gpg, shellcheck present. account_switch: none (cswap present). Plugin 1.0.43 = marketplace.
 A3 start 17:48: depends A1 relaxed — rename already committed (abac0f3/e14cbc2); A3 files (crates/vr-telex/Cargo.toml [package.metadata.deb], packaging/deb/**, tests/deb/**) disjoint from A1 leftovers. A2 waits on A1 verify (shares tests/install/**).
 parallel: A1 verify ∥ A3 — files disjoint (A1 read-only now).
-eta: ~20:00 (set 17:48, updated after A1 round 1; basis: A1 verify 20m → A2 60m; A3 45m → A4 60m; Phase 5 30m; install 10m)
+eta: ~19:30 (set 17:48, updated 18:27: tasks done; basis: sign-off + Phase 5 ~30m, fixes ~20m, install 10m)
 hand-off: ready (17:48)
 A1 review 17:51: opus REVIEW_FAIL, rule table ✓ — 4 major (selection not kept on migration install.sh:543; tests missing for same position, runtime/address-file cleanup, mode no-overwrite). Spec AC-2 says keep the selection → code fix, no user decision. Round 1 waits for A1 qc (shared tree).
 A1 qc 17:52: sonnet QC_PASS (247 tests, 40 install scenarios, guard clean), rule table ✓; its AC-2 mapping is weaker than the review's (did not confirm runtime-file cleanup). Round 1 opened 17:52: 4 review majors, fresh developer (opus: installer + security tag). Files: install.sh, uninstall.sh, packaging/common.sh, tests/install/** — disjoint from A3.
@@ -52,3 +53,12 @@ A2 review 18:17: opus REVIEW_FAIL, rule table ✓ — 2 major (override refused 
 A2 qc 18:19: sonnet QC_PASS, rule table ✓ (55 scenarios, strict deb PASS, apt test with the real .deb PASS — closes A4's unverified item). Round 1 opened 18:19 to the same developer with the 4 review findings.
 A2 round 1 DONE 18:25: 57 scenarios 0 failed, strict deb PASS, guard ✓; re-check sent to the opus reviewer.
 A2 re-check 18:26: opus REVIEW_PASS, rule table ✓. A2 done, committed (with capabilities.md lines of A2 and A4). Backlog for the report: --remove without a backup deletes ~/.local/bin/vr-telex unchecked (pre-existing).
+sign-off + Phase 5 start 18:26 on bfb5af7 (scope e14cbc2..bfb5af7): one sign-off qc (sonnet) ∥ Phase 5 unattended via Agent: correctness + security reviewers (opus); no ui dimension (has_ui false). Monitor scan due.
+Phase 5 security 18:29: 1 major (re-signing trusts planted pool files on gh-pages) → adversarial verifier (opus) spawned; 1 minor (signing secret repo-wide, tag on any commit) → rides along in the fix round; the GitHub environment / tag ruleset creation itself is a user step.
+Phase 5 verify 18:29: pool-laundering finding confirmed by PoC (qa-artifacts/P5/planted/) but downgraded to low — whoever can push gh-pages can already push a v* tag that runs a modified build.sh with the key. Plan: one quick pass (P5-1) with this + the workflow minor (environment for the key, tag must be on master), after the correctness dimension reports; environment/ruleset/branch protection = user steps.
+sign-off qc 18:30: sonnet QC_PASS on bfb5af7 (247 tests, guard, 57 install scenarios, strict deb, apt with real .deb, shellcheck -x, YAML); unverified: live GitHub run (needs push), AC-8 (install, next). Waiting on Phase 5 correctness.
+Phase 5 correctness 18:30: 1 major (CI never runs tests/install/run.sh — confirmed by the leader's grep of the workflows, no verifier spawned for a one-line fact), 4 minor. Fix task P5-1 opened 18:30 (developer opus: CI + signing), all Phase 5 findings in one round; re-checks by both Phase 5 reviewers, qc on the fixed files.
+P5-1 DONE 18:42: rule table ✓, guard ✓; tests/apt 59 ok, strict deb 70 ok, install 57/57, shellcheck rc 0. Deviation: common.sh shellchecked with -S warning -e SC2034,SC2174 (out of scope; for the report). Re-checks sent to both Phase 5 reviewers; qc on the fixed files spawned.
+P5-1 security re-check 18:43: both findings fixed, no new finding; uncertain for the user: whether the gh-pages ruleset bypass (Integration 15368) covers GITHUB_TOKEN pushes (fails closed if not). Waiting on correctness re-check and qc.
+P5-1 correctness re-check 18:43: all 5 fixed, no new finding. Waiting on P5-1 qc.
+P5-1 qc 18:46: sonnet QC_PASS (apt 59, PoC refused, strict deb 70, install 57 under env -i, YAML + CI shellcheck lines). P5-1 done, committed. Next: AC-8 install from a clean worktree of the commit.
