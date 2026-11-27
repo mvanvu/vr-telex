@@ -84,3 +84,4 @@ B3 qc 20:48: sonnet QC_PASS, rule table ✓ (real .deb + DPKG_ROOT lifecycle), F
 B3 round 1 DONE 20:53: tests/apt 11× green, deb 96, get 132, shellcheck/YAML/guard ok; re-checks sent to the opus reviewer and to qc (F1).
 B3 qc re-check 20:54: QC_PASS (apt 5×60, deb 96, get 132; helpers fail closed). Waiting on review re-check.
 B3 re-check 20:54: opus REVIEW_PASS; new minor (unpublished draft blocks a re-run) fixed by the leader as a RELEASING.md text line. B3 done, committed.
+release v0.1.2 21:17: run 46011780905 green (publish approved by the user), Latest v0.1.2, 9 assets. Live apt check in a throwaway root with the packaged .sources: apt-get update OK through GitHub redirects (InRelease signed), candidate 0.1.2-1, apt-get download → identical .deb. User's machine still 0.1.1 → run vr-telex-update once.
