@@ -10,7 +10,7 @@
 
 ## Notes
 presence: away (user, 14:39)
-hand-off: ready (14:39)
+hand-off: done (16:14)
 fable-policy: auto (user, carried from previous run 19:15 26 Nov)
 commits: local, one per task, no push (user, 26 Nov 19:15; confirmed 14:21)
 install: reinstall daemon from the final reviewed commit (user, 14:21)
@@ -36,3 +36,4 @@ P5-1 DONE (15:52): rule table 20 pass, guard clean. Re-check by the P5 correctne
 P5-2 DONE (15:53): rule table pass, guard clean; set_caps keeps last (dev decision, noted). Re-checks queued to the P5 reviewers.
 P5 re-checks (15:55): corr #1-#4 closed, sec #1 #2 closed, sec P5-2 []; new: corr major (D15 regression: AI/UI acronyms set Vi) + sec minor (BackSpace replay composer buffers grow, unwiped). P5-1 fix round 1 carries both. P5-2 re-checked clean; commit order P5-1 then P5-2 (P5-2 files disjoint).
 P5 (16:01): all re-checks clean (correctness r1 [], security qp1 []). Commits P5-1 then P5-2. Next: one qc re-verification (full suite + e2e smoke + cases, fixes touched telex-core core path), then install.
+final (16:14): QC_PASS on 5508196 (intermittent harness flakes, not reproduced). Installed from a clean detached worktree of 5508196: ~/.local/bin/vr-talex 2,903,072 B 16:14, service active since 16:14:19. eta: reached 16:14.

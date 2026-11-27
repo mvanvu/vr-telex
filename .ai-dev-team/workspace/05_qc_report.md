@@ -66,3 +66,35 @@ Tree: HEAD a8f098e + uncommitted E3 incl. fix round 1 (ime.rs `end_word(at_curso
 | SEC-1 | pass | 0 hits both runs |
 
 QC_PASS (fix round 1)
+
+## Final re-verification (5508196)
+Commit 5508196 (P5-1 5b0604a, P5-2 5508196); tree clean except team files. Release daemon rebuilt from it. Artefacts: qa-artifacts/E3/{final-cargo-test.log, final*, final-smoke*}.
+
+1. `cargo test --workspace --locked`: rc=0, 28 `test result: ok`, 0 failed. `cargo fmt --check` ok; `cargo clippy --workspace --all-targets --locked -- -D warnings` clean.
+2. Cases through the real daemon (flow.sh, `--apps "term chrome omnibox"`, final/ then term rerun final2/, guiwr 6x in final3/):
+   - Earlier cases (has, the best, use, tooi/toi raats thichs, the has, twwa): pass on term, chrome, omnibox.
+   - `guiwr email cho anh max ` -> `gửi email cho anh mã `: pass chrome and omnibox; term pass in final3 (6/6 with the sentence and 6/6 `guiwr ` -> `gửi `), but one term run (final2, line 8 of the list) gave `guiwr email cho anh mã ` (first word raw, rest right).
+   - `usern`+BackSpace+space -> `user `; `the pass ` -> `the pass `; `ass ` first -> `as `; `the AI is best ` -> `the AI is best `; `user `+5xBackSpace+`bets ` -> `bét `: all pass on term (final2), chrome and omnibox (final).
+   - D12 (`has` + click -> `há`) and D13 (`XYZ ` + `the bes` + click -> `XYZ the bé`, focus #o) pass in chrome.
+   - Flakes (term only, all harness-side at window open or between focus events; none on chrome/omnibox): first launch `final/` the term file came out empty (all 13 term cases `<missing>`, terminal ended without writing; chrome and omnibox passed 13/13 plus D12/D13); the one raw `guiwr` word above, passing 12/12 in the next launch.
+3. e2e smoke `--smoke --ime daemon`: first launch (final-smoke): AC-2:chrome "could not put the engine in VI mode" and term corpus typed raw (replaced 100: `ex`/`eej`/`uw` instead of Vietnamese), i.e. engine stayed in EN mode, environment/startup (indicator never VI), AC-3, AC-4, AC-7, SEC-1 pass. One relaunch (final-smoke2): AC-2:term PASS (712 chars, lost 0/extra 0), AC-2:chrome content lossless (lost 0/extra 0/replaced 0) but FAIL by injection rate only (16.6 ms/key > 16), AC-3/AC-4/AC-7 PASS, AC-10 INCOMPLETE (D24, unit tests). No word differed in the corpus by AC-2/AC-3, and no Vietnamese word turned English while the engine was in VI mode (the first launch's raw words were typed in EN mode).
+4. Size: target/release/vr-talex 2,903,072 B vs 2,793,008 B installed: +110,064 B (limit ~1.5 MB). SEC-1: 0 hits in every launch (cases 36 tokens, smoke 60 tokens), daemon stdout/stderr empty.
+
+### Rule check (final)
+| ID | Result | Evidence |
+|---|---|---|
+| AC-1 | pass | the best, use, the pass, the AI is best |
+| AC-2 | pass with caveat | lossless corpus in launch 2; launch 1 start-up in EN mode, rate-only failure on chrome (load) |
+| AC-3 | pass | tooi/toi raats thichs, guiwr...mã, bets -> bét |
+| AC-4 | pass | has -> há, ass -> as, usern<BS> -> user |
+| AC-5 | pass | the has, the pass |
+| FR-13 | pass | twwa -> twa |
+| D12 / D13 | pass | chrome |
+| D14-D19 | pass | the pass, ass, guiwr (D15), BackSpace cases (D16), AI (D19) in live cases; D17 only by unit tests |
+| AC-6 | pass | +110,064 B; latency tests in the suite ok |
+| AC-8 | pass | suite, fmt, clippy green; smoke lossless on relaunch |
+| SEC-1/SEC-2 | pass | 0 hits |
+
+Open observation (not a defect of the tree as far as shown): intermittent term-only start-up/focus flakes (empty file once, one raw first word once, EN-mode startup once in smoke), not reproduced on chrome/omnibox and not tied to a repeatable case.
+
+QC_PASS (5508196)
