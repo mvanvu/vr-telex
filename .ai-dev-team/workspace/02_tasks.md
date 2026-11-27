@@ -72,3 +72,4 @@ B1 DONE gate 19:55: rule table ✓, guard ✓; tests/get 130 ok, strict deb 71 o
 B1 qc 19:56: sonnet QC_PASS (tests/get 130, strict deb, cargo test, CI lint lines, independent e2e on local fake release). Waiting on B1 review.
 B1 review 19:58: opus REVIEW_PASS, rule table ✓; quick pass 1 (sonnet) for minor --latest + low README first-run note; for the report: /tmp fixed name in the user's install line (low, user's choice), replay of an older signed set (low, no older set exists). Leader: Pages off + gh-pages deleted now (user chose 'Bỏ hẳn repo apt').
 pages 19:58: API refused DELETE pages (422); deleting the gh-pages branch removed the site (GET pages → 404). Repo apt gone.
+release v0.1.1 20:18: run 46003756046 green (publish approved by the user), Latest = v0.1.1, assets deb + vr-telex-install.sh + SHA256SUMS(.asc); leader check: Good signature, script sha OK and = repo copy. Run complete; user installs with the README line.
