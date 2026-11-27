@@ -102,8 +102,17 @@ check "README: install line" readme_has \
   "wget -qO- $OFFICIAL_URL/vr-telex-install.sh | sh"
 check "README: update command" readme_has "vr-telex-update"
 check "README: remove commands" readme_has "vr-telex-setup --remove"
-no_apt_repo_left() { ! grep -qE 'github\.io|gh-pages|sources\.list|keyrings' "$REPO/README.md"; }
-check "README: no apt repository left" no_apt_repo_left
+# 0.1.1 and older have no apt source: those users need one vr-telex-update run.
+readme_says() { grep -qF -- "$1" "$REPO/README.md"; }
+# shellcheck disable=SC2016 # literal backticks of the README
+check "README: 0.1.1 or older run vr-telex-update once" \
+  readme_says 'If you installed vr-telex 0.1.1 or older, run `vr-telex-update` once'
+# shellcheck disable=SC2016 # literal backticks of the README
+check "README: apt update right before apt upgrade" \
+  readme_says 'Run `sudo apt update` right before `sudo apt upgrade`'
+# The apt source is the package's own (D-APT-3); the GitHub Pages one is gone.
+no_pages_repo_left() { ! grep -qE 'github\.io|gh-pages' "$REPO/README.md"; }
+check "README: no GitHub Pages apt repository left" no_pages_repo_left
 
 # --- throwaway keys (never the real release key) -----------------------------
 new_key() { # new_key <gnupghome>; prints the fingerprint
@@ -290,7 +299,9 @@ no_setup() { ! grep -q '^vr-telex-setup' "$CALLS"; }
 tmp_clean() { [ -z "$(ls -A "$RUN_TMP")" ]; }
 failed() { [ "$RC" -ne 0 ]; }
 said() { grep -qE -- "$1" "$LOG"; }
-fetched() { tail -n +"$((REQ_BEFORE + 1))" "$HTTP_LOG" | grep -q "GET /$1 "; }
+# tail's output is captured first: with pipefail, `tail | grep -q` can fail when
+# grep exits before tail has written everything (SIGPIPE).
+fetched() { grep -q "GET /$1 " <<<"$(tail -n +"$((REQ_BEFORE + 1))" "$HTTP_LOG")"; }
 fetched_nothing() { [ "$(wc -l <"$HTTP_LOG")" -eq "$REQ_BEFORE" ]; }
 refused() { # refused <case> <reason pattern>: failed, said why, no sudo, no setup, temp dir gone
   check "$1: exits non-zero" failed

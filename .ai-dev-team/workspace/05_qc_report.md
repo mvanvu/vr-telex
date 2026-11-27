@@ -174,3 +174,38 @@ Engines: shell only (no UI). Logs in $TEAM_WS/qa-artifacts/B1/qc/, e2e in qa-art
 | BASE-14/15/17 (no polling, own processes only, no data left) | PASS |
 
 QC_PASS B1
+
+## QC B3
+Engine: shell/CLI only (no UI). Artifacts: .ai-dev-team/workspace/qa-artifacts/B3/qc/ (logs, real .deb, ctl/).
+- tests/apt/run.sh, stand-ins: run 1 FAIL (59 ok, 1 FAIL "apt-cache policy: installed 0.0.1~test-1, candidate 0.0.2-1", apt-stand.log); reruns: apt-stand2/r1/r2 all PASS 60 ok. FLAKY 1 in 4 runs (see Finding F1).
+- tests/apt/run.sh with real cargo-deb 0.1.2 .deb: PASS (apt-real.log).
+- VR_TELEX_DEB_STRICT=1 tests/deb/run.sh: PASS, 93 ok (deb.log). tests/get/run.sh: PASS (get.log). tests/install/run.sh: 57 scenarios, 0 failed. cargo test --workspace --locked: rc 0, no failures.
+- shellcheck both commands from test.yml: rc 0 and 0 (release.yml has the same two). YAML parse of release.yml and test.yml ok.
+- Real .deb: `dpkg-deb -c`: ./usr/share/keyrings/vr-telex.gpg -rw-r--r-- 0/0, ./usr/share/vr-telex/vr-telex.sources -rw-r--r-- 0/0, 0 entries under ./etc. Keyring: one pub key, fpr 2C30E91F97E5A566BEFF373736C30B9165329B85, no sec. Template: Types deb, URIs https://github.com/mvanvu/vr-telex/releases/latest/download/, Suites ./, Architectures amd64, Signed-By /usr/share/keyrings/vr-telex.gpg (matches D-APT-3). Version 0.1.2 (file name).
+- Maintainer scripts run by me under DPKG_ROOT=<temp dir> (system /etc untouched; vr-telex files in /etc/apt/sources.list.d: 0): postinst configure -> source written 0644, identical to the template, no other /etc file; edited file (Enabled: no) kept on second configure with a 2-line note; postrm upgrade keeps it; postrm remove deletes it; configure + postrm purge deletes it; leftovers only empty dirs.
+- Finding F1 (medium, test flakiness, not a product defect): tests/apt/run.sh has `set -euo pipefail` and helpers `policy | grep -q...` (candidate_is, installed_old_candidate_new). grep -q exits early, apt-cache can get SIGPIPE, the pipeline returns non-zero under pipefail: probable cause of the single intermittent failure (not proven). Could fail the release build job / CI at random. Suggested fix: capture `policy` output into a variable, then grep the variable. Rerun count stayed within limits (3 reruns of one file, all green).
+
+## Rule check B3
+| Rule | Result | Evidence |
+|---|---|---|
+| D-APT-3 keyring path/mode | PASS | dpkg-deb -c, 644 |
+| D-APT-3 source URIs/Suites/Signed-By | PASS | template read from .deb |
+| Key fingerprint 2C30E91F...5329B85 | PASS | gpg --show-keys |
+| postinst writes source; edit survives; postrm remove/purge deletes (DPKG_ROOT) | PASS | run above |
+| Nothing under /etc in .deb | PASS | 0 entries |
+| AC-4/AC-6/AC-7 suites | PASS | apt, deb, get, install, cargo |
+| shellcheck / YAML | PASS | rc 0 |
+| Test determinism | WARN | F1 flaky 1/4 |
+| No system change (sudo/apt/install, gnupg dir) | PASS | not touched |
+
+QC_PASS B3 (with advisory F1)
+
+## QC B3 re-check
+Related checks only (logs: qa-artifacts/B3/qc/rc-*.log), all via run-heavy.sh:
+- tests/apt/run.sh x5 in a row: rc 0, 60 ok, 0 FAIL each time (rc-apt1..5.log).
+- VR_TELEX_DEB_STRICT=1 tests/deb/run.sh: rc 0, 96 ok, PASS.
+- tests/get/run.sh: rc 0, 132 ok, PASS.
+- Helper review (tests/apt/run.sh policy_has/candidate_is/no_candidate/plans_upgrade/nothing_to_upgrade; tests/deb no_at_maintainer, keyring_binary, no_etc, dirs_root_owned; tests/get fetched): each captures command output with `|| return 1` (or `&&`) before grep, so a failing apt-cache / apt-get / gpg fails the check; negated greps (`! grep`) run only after a successful capture. Residual (low): deb `no_etc`/`dirs_root_owned` and get `fetched` read a captured/`$(...)` value without checking the producer's rc; an empty CONTENTS would pass vacuously, but CONTENTS=$(dpkg-deb -c) aborts under set -e on failure and the earlier file-list diff check fails on empty, so not exploitable in practice.
+F1 resolved: 5/5 green.
+
+QC_PASS

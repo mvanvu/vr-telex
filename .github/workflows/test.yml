@@ -25,10 +25,11 @@ jobs:
       # gdbus (libglib2.0-bin), the org.gnome.desktop.input-sources schema
       # (gsettings-desktop-schemas) and python3 with GLib introspection for
       # its stand-in daemons (python3-gi, gir1.2-glib-2.0).
+      # tests/apt/run.sh needs apt-ftparchive (apt-utils).
       - name: Install tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends dbus-daemon gpg gpgv shellcheck wget curl \
+          sudo apt-get install -y -q --no-install-recommends dbus-daemon gpg gpgv shellcheck wget curl apt-utils \
             libglib2.0-bin gsettings-desktop-schemas python3-gi gir1.2-glib-2.0
           rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update
 
@@ -41,7 +42,7 @@ jobs:
           cargo fmt --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
           shellcheck -x packaging/get/vr-telex-install.sh packaging/get/embed-key.sh tests/get/run.sh \
-            tests/deb/run.sh install.sh uninstall.sh \
+            tests/deb/run.sh tests/apt/run.sh packaging/apt/build-flat-repo.sh install.sh uninstall.sh \
             packaging/vr-telex-setup packaging/deb/postinst packaging/deb/prerm packaging/deb/postrm
           shellcheck -x -S warning -e SC2034,SC2174 packaging/common.sh
 
@@ -53,3 +54,6 @@ jobs:
 
       - name: Install script test
         run: bash tests/get/run.sh
+
+      - name: Apt repository test
+        run: bash tests/apt/run.sh

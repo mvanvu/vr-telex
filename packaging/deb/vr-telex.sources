@@ -1,0 +1,10 @@
+# Written by the vr-telex package so that `sudo apt update && sudo apt upgrade`
+# installs new vr-telex releases: the flat apt repository published with each
+# GitHub Release, signed with the key in /usr/share/keyrings/vr-telex.gpg.
+# To stop updates from it, add the line "Enabled: no"; the package keeps an
+# edited file. `sudo apt remove vr-telex` removes this file.
+Types: deb
+URIs: https://github.com/mvanvu/vr-telex/releases/latest/download/
+Suites: ./
+Architectures: amd64
+Signed-By: /usr/share/keyrings/vr-telex.gpg

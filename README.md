@@ -44,26 +44,53 @@ from this repository, then run `gpg --import vr-telex.asc`,
 `2C30E91F97E5A566BEFF373736C30B9165329B85`) and `sha256sum -c --ignore-missing SHA256SUMS`.
 
 The package installs files system-wide (`/usr/bin/vr-telex`, `/usr/bin/vr-telex-setup`,
-`/usr/bin/vr-telex-update`, the `vr-telex.service` user unit) and does not touch running
+`/usr/bin/vr-telex-update`, the `vr-telex.service` user unit, the release key as
+`/usr/share/keyrings/vr-telex.gpg`), adds the apt source
+`/etc/apt/sources.list.d/vr-telex.sources` (see Update) and does not touch running
 sessions. `vr-telex-setup` does the per-user part, as your own user without `sudo`: it
 starts `vr-telex.service`, sets the input sources and saves the previous setup, as
 `./install.sh` does below. Each other user who wants vr-telex runs `vr-telex-setup` once.
 It works at once; Qt and X11 apps pick it up after the next login.
 
-**Update:** run, as your own user:
+**Update:** new releases come with the system updates:
+
+```sh
+sudo apt update && sudo apt upgrade
+```
+
+If you installed vr-telex 0.1.1 or older, run `vr-telex-update` once (see below): those
+versions do not add the apt source. From 0.1.2 on, apt updates vr-telex.
+
+The package's apt source points at the apt repository published with each GitHub release
+(the latest one only), and apt checks it with the release key above, used for this source
+only. Run `sudo apt update` right before `sudo apt upgrade`, as above: once a newer release
+is out, package lists read before it can make the download fail (`404 Not Found` or a hash
+mismatch), and another `sudo apt update` fixes that. The upgrade replaces the program but does not restart the vr-telex you are running,
+so then run, as your own user:
+
+```sh
+vr-telex-setup
+```
+
+It reloads your systemd user manager, writes the per-user files again from the new package
+(`~/.config/environment.d/90-vr-telex.conf`, `~/.xinputrc`, the fcitx5 autostart override
+and D-Bus service file; a copy you edited since is moved aside, not overwritten), keeps the
+backup from the first run, puts Vietnamese (Telex) first again and restarts vr-telex on the
+new version. Until you run it (or restart the computer) the old version keeps running.
+Other users of the machine run `vr-telex-setup` again themselves.
+
+To stop apt from updating vr-telex, add the line `Enabled: no` to
+`/etc/apt/sources.list.d/vr-telex.sources`; the package keeps a file you edited.
+
+Alternatively, update without apt by running the install script the package installs:
 
 ```sh
 vr-telex-update
 ```
 
-It is the same script, installed by the package: it checks the latest release the same
-way and prints `already up to date` when you have it. Otherwise it installs the new
-version and runs `vr-telex-setup` again, which reloads your systemd user manager, writes
-the per-user files again from the new package (`~/.config/environment.d/90-vr-telex.conf`,
-`~/.xinputrc`, the fcitx5 autostart override and D-Bus service file; a copy you edited
-since is moved aside, not overwritten), keeps the backup from the first run, puts
-Vietnamese (Telex) first again and restarts vr-telex on the new version. Other users of
-the machine run `vr-telex-setup` again themselves.
+It checks the latest release the same way as the install command, prints
+`already up to date` when you have it, and otherwise installs the new version and runs
+`vr-telex-setup` for you.
 
 **Remove:** first undo the per-user setup while the package is still installed, then remove
 the package:
@@ -72,6 +99,11 @@ the package:
 vr-telex-setup --remove
 sudo apt remove vr-telex
 ```
+
+`sudo apt remove vr-telex` also removes the apt source and the release key, so
+`apt update` stops checking for vr-telex. `sudo apt purge vr-telex` removes nothing more
+from the system: the package keeps no configuration of its own, and the per-user files are
+what `vr-telex-setup --remove` restores.
 
 ### From source
 

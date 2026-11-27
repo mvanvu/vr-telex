@@ -2,9 +2,13 @@ name: release
 
 # On a version tag: test, build the .deb and publish a GitHub Release with
 #   vr-telex_<version>-1_amd64.deb, vr-telex-install.sh,
-#   SHA256SUMS (of those two) and SHA256SUMS.asc (detached, armored signature).
+#   SHA256SUMS (of those two) and SHA256SUMS.asc (detached, armored signature),
+#   and a signed flat apt repository for that .deb: Packages, Packages.gz,
+#   Release, InRelease, Release.gpg (packaging/apt/build-flat-repo.sh).
 # Users install with vr-telex-install.sh from the latest release (README >
-# Install); it installs only what SHA256SUMS.asc vouches for.
+# Install); it installs only what SHA256SUMS.asc vouches for. The package's
+# apt source points at releases/latest/download/, so `apt upgrade` installs
+# what the latest release's InRelease vouches for.
 #
 # Needs the secret APT_GPG_PRIVATE_KEY (armored secret key whose fingerprint
 # matches packaging/apt/vr-telex.asc) and, if that key has one,
@@ -48,10 +52,11 @@ jobs:
 
       # libglib2.0-bin, gsettings-desktop-schemas, python3-gi and gir1.2-glib-2.0:
       # tests/install/run.sh (see test.yml). gpg, gpgv, wget, curl: tests/get/run.sh.
+      # apt-utils (apt-ftparchive): tests/apt/run.sh.
       - name: Install tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends dbus-daemon gpg gpgv shellcheck wget curl \
+          sudo apt-get install -y -q --no-install-recommends dbus-daemon gpg gpgv shellcheck wget curl apt-utils \
             libglib2.0-bin gsettings-desktop-schemas python3-gi gir1.2-glib-2.0
           rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update
           cargo install cargo-deb --locked --version 3.8.0
@@ -61,7 +66,7 @@ jobs:
           cargo fmt --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
           shellcheck -x packaging/get/vr-telex-install.sh packaging/get/embed-key.sh tests/get/run.sh \
-            tests/deb/run.sh install.sh uninstall.sh \
+            tests/deb/run.sh tests/apt/run.sh packaging/apt/build-flat-repo.sh install.sh uninstall.sh \
             packaging/vr-telex-setup packaging/deb/postinst packaging/deb/prerm packaging/deb/postrm
           shellcheck -x -S warning -e SC2034,SC2174 packaging/common.sh # see test.yml
           cargo test --workspace --locked
@@ -91,6 +96,7 @@ jobs:
         run: |
           VR_TELEX_DEB_STRICT=1 bash tests/deb/run.sh "$DEB"
           bash tests/get/run.sh
+          bash tests/apt/run.sh "$DEB"
 
       - name: Collect the release files
         env:
@@ -133,10 +139,10 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends gpg gpgv
+          sudo apt-get install -y -q --no-install-recommends gpg gpgv apt-utils
 
       # Never add `set -x` or echo the key variables in this step.
-      - name: Write and sign SHA256SUMS
+      - name: Write and sign SHA256SUMS and the apt repository
         env:
           APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
           APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
@@ -173,13 +179,20 @@ jobs:
           printf '%s' "${APT_GPG_PASSPHRASE:-}" |
             gpg --batch --yes --no-tty --pinentry-mode loopback --passphrase-fd 0 \
               --local-user "$FPR!" --armor --detach-sign --output "$REL/SHA256SUMS.asc" "$REL/SHA256SUMS"
-          unset APT_GPG_PASSPHRASE
           # What the install script checks: the signature with the pinned key
           # alone, then the hashes.
           PINNED="$GNUPGHOME/pinned.gpg"
           mkdir -m 700 "$GNUPGHOME/verify"
           GNUPGHOME="$GNUPGHOME/verify" gpgv --keyring "$PINNED" "$REL/SHA256SUMS.asc" "$REL/SHA256SUMS"
           (cd "$REL" && sha256sum --strict -c SHA256SUMS)
+          # The flat apt repository the package's source reads (same key, same
+          # passphrase pipe); the script checks both signatures with the pinned
+          # key before writing Packages, Packages.gz, Release, InRelease and
+          # Release.gpg beside the .deb.
+          APT_GPG_KEY="$FPR" bash packaging/apt/build-flat-repo.sh "$REL/$DEB" "$REL"
+          unset APT_GPG_PASSPHRASE
+          [ "$(find "$REL" -mindepth 1 | wc -l)" = 9 ] ||
+            { echo "::error::unexpected release files: $(ls "$REL")"; exit 1; }
 
       - name: Publish the GitHub Release
         env:
@@ -190,10 +203,27 @@ jobs:
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/release"
-          files=("$DEB" vr-telex-install.sh SHA256SUMS SHA256SUMS.asc)
+          files=("$DEB" vr-telex-install.sh SHA256SUMS SHA256SUMS.asc Packages Packages.gz Release InRelease Release.gpg)
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "${files[@]}" --clobber
+            # A re-run over an existing release. Assets are replaced one by one,
+            # so the .deb already published under this name must stay the same
+            # bytes: then Packages and Packages.gz are the same bytes too, the
+            # old and new InRelease list the same hashes, and no client sees a
+            # mismatch at any point. A rebuilt .deb (a full workflow re-run)
+            # differs and is refused: re-run only this job, which reuses the
+            # build artifact, or bump the version (packaging/get/RELEASING.md).
+            assets=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+            if grep -qxF -- "$DEB" <<<"$assets"; then
+              mkdir -p "$RUNNER_TEMP/published"
+              gh release download "$TAG" --pattern "$DEB" --dir "$RUNNER_TEMP/published" --clobber
+              cmp -s -- "$RUNNER_TEMP/published/$DEB" "$DEB" ||
+                { echo "::error::$TAG already publishes a different $DEB; re-run only the publish job, or bump the version"; exit 1; }
+            fi
+            # InRelease last: it never names a file that is not uploaded yet.
+            gh release upload "$TAG" "$DEB" vr-telex-install.sh SHA256SUMS SHA256SUMS.asc Packages Packages.gz --clobber
+            gh release upload "$TAG" Release Release.gpg --clobber
+            gh release upload "$TAG" InRelease --clobber
           else
             gh release create "$TAG" "${files[@]}" --verify-tag --title "vr-telex ${TAG#v}" \
-              --notes "Install or update: see README.md (Install). SHA256SUMS is signed with the key in packaging/apt/vr-telex.asc."
+              --notes "Install: see README.md (Install). Update: sudo apt update && sudo apt upgrade. SHA256SUMS and the apt repository (InRelease) are signed with the key in packaging/apt/vr-telex.asc."
           fi

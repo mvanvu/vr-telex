@@ -10,6 +10,14 @@ the same file as `/usr/bin/vr-telex-update`. It downloads from
 
 and installs only when `SHA256SUMS.asc` verifies with the key embedded in the script.
 
+The package also writes the apt source `/etc/apt/sources.list.d/vr-telex.sources` (from
+`packaging/deb/vr-telex.sources`) with the key `/usr/share/keyrings/vr-telex.gpg`
+(`packaging/deb/vr-telex.gpg`), so `apt update && apt upgrade` reads the flat apt
+repository published with each release: `Packages`, `Packages.gz`, `Release`, `InRelease`
+and `Release.gpg` (`packaging/apt/build-flat-repo.sh`), beside the .deb. apt asks for
+`<base>/./InRelease`, `<base>/./Packages.gz` and `<base>/<deb name>`; GitHub redirects
+each to the asset of the latest release. Only the latest version is offered.
+
 ## Publishing a release
 
 1. Bump `[workspace.package] version` in `Cargo.toml` and refresh `Cargo.lock`
@@ -17,14 +25,24 @@ and installs only when `SHA256SUMS.asc` verifies with the key embedded in the sc
 2. Tag that `master` commit `v<version>` and push the tag.
 3. `.github/workflows/release.yml`: the `build` job refuses a tag that is not on `master`,
    tests, builds the .deb (its name must match the tag) and runs `tests/deb/run.sh` and
-   `tests/get/run.sh`. The `publish` job waits for the owner's approval (environment
+   `tests/get/run.sh` and `tests/apt/run.sh`. The `publish` job waits for the owner's approval (environment
    `apt-release`), writes `SHA256SUMS`, signs it with the release key (only the pinned
    fingerprint is accepted) in a temp GnuPG home removed on exit, checks the signature
-   with gpgv against `packaging/apt/vr-telex.asc`, and uploads the four files to the
-   GitHub Release (created as the latest release).
+   with gpgv against `packaging/apt/vr-telex.asc`, builds and signs the apt repository with
+   the same key (`packaging/apt/build-flat-repo.sh`, which checks both signatures with the
+   pinned key), and uploads the nine files to the GitHub Release (created as the latest
+   release).
+4. If the `publish` job fails, re-run only that job ("Re-run failed jobs"): it reuses the
+   build job's .deb, so the files it replaces on the release keep the same hashes and apt
+   clients never see an `InRelease` that does not match. A full re-run rebuilds the .deb,
+   and the `publish` job refuses to replace a published .deb with different bytes; for a
+   new build, bump the version and tag again. If the release was never published (still a
+   draft, or no `InRelease` among its assets), delete it with `gh release delete <tag>`
+   (the tag stays) and run the workflow again instead.
 
 Local tests: `bash tests/get/run.sh` (throwaway keys, local HTTP server, stubbed sudo and
-apt; no network, no root).
+apt; no network, no root) and `bash tests/apt/run.sh` (throwaway key, a local server that
+redirects like GitHub, apt-get in a throwaway apt root).
 
 ## Signing key
 
@@ -44,12 +62,17 @@ Do this a few months before the expiry date. The fingerprint does not change.
    `gpg --homedir "$KEYHOME" --quick-set-expire 2C30E91F97E5A566BEFF373736C30B9165329B85 3y`
 2. Re-export the public key into the repository:
    `gpg --homedir "$KEYHOME" --armor --export 2C30E91F97E5A566BEFF373736C30B9165329B85 >packaging/apt/vr-telex.asc`
-3. Regenerate the embedded copy: `packaging/get/embed-key.sh`, then `bash tests/get/run.sh`.
-   Commit both files.
+3. Regenerate the embedded copy and the packaged keyring:
+   `packaging/get/embed-key.sh` and
+   `gpg --dearmor <packaging/apt/vr-telex.asc >packaging/deb/vr-telex.gpg`, then
+   `bash tests/get/run.sh` and `bash tests/deb/run.sh`. Commit the three files.
 4. Update the CI secret (piped, never written to a file):
    `gpg --homedir "$KEYHOME" --armor --export-secret-keys 2C30E91F97E5A566BEFF373736C30B9165329B85 | gh secret set APT_GPG_PRIVATE_KEY --env apt-release --repo mvanvu/vr-telex`
 5. Publish a release. gpgv does not reject signatures made by an expired key, so old
-   `vr-telex-update` copies keep working; the new script carries the renewed key.
+   `vr-telex-update` copies keep working; the new script carries the renewed key. apt
+   does reject them (EXPKEYSIG): the release with the renewed keyring must be published,
+   and installed by `apt upgrade`, before the old expiry date, or users on apt updates
+   have to run `vr-telex-update` once.
 
 A new key (new fingerprint) is the same steps with the new key; installed copies of
 `vr-telex-update` only trust the old key, so publish one last release signed with the old

@@ -1,14 +1,39 @@
 #!/bin/sh
-# Runs as root under dpkg. It only prints the next step: enabling vr-telex
-# changes per-user state (input sources, user unit, environment), which
-# belongs to each user's own `vr-telex-setup` run, never to the package.
+# Runs as root under dpkg. Enabling vr-telex changes per-user state (input
+# sources, user unit, environment), which belongs to each user's own
+# `vr-telex-setup` run, never to the package; here it only prints that step
+# and adds the apt source.
+#
+# The apt source lets `apt update && apt upgrade` install new releases. It is
+# written here, not shipped as a conffile, so that `apt remove` takes it away
+# together with its keyring (/usr/share/keyrings/vr-telex.gpg, a package file;
+# see postrm): a source left behind without its key makes every `apt update`
+# fail. An existing file is never replaced, so a local edit ("Enabled: no")
+# stays. DPKG_ROOT is dpkg's --root/--instdir, empty on a normal install.
 set -e
+
+SOURCE_TEMPLATE="$DPKG_ROOT/usr/share/vr-telex/vr-telex.sources"
+SOURCE_DIR="$DPKG_ROOT/etc/apt/sources.list.d"
+SOURCE_FILE="$SOURCE_DIR/vr-telex.sources"
 
 case "$1" in
 configure)
+  if [ ! -e "$SOURCE_FILE" ] && [ ! -L "$SOURCE_FILE" ]; then
+    mkdir -p "$SOURCE_DIR"
+    # apt ignores *.dpkg-new silently, so a reader never sees a partial file.
+    # A leftover one is removed first: cp would write through a symlink.
+    rm -f "$SOURCE_FILE.dpkg-new"
+    cp "$SOURCE_TEMPLATE" "$SOURCE_FILE.dpkg-new"
+    chmod 0644 "$SOURCE_FILE.dpkg-new"
+    mv -f "$SOURCE_FILE.dpkg-new" "$SOURCE_FILE"
+  elif ! cmp -s "$SOURCE_TEMPLATE" "$SOURCE_FILE"; then
+    echo "vr-telex: kept your /etc/apt/sources.list.d/vr-telex.sources; the packaged"
+    echo "vr-telex: one is /usr/share/vr-telex/vr-telex.sources."
+  fi
   echo "vr-telex: installed. Each user turns it on by running 'vr-telex-setup' as"
   echo "vr-telex: themselves (not root). It works at once;"
   echo "vr-telex: Qt and X11 apps pick it up after the next login."
+  echo "vr-telex: 'sudo apt update && sudo apt upgrade' installs new releases."
   echo "vr-telex: After an upgrade, each user runs 'vr-telex-setup' again."
   ;;
 esac

@@ -55,6 +55,12 @@ assets = [
     ["../../packaging/xinputrc", "usr/share/vr-telex/", "644"],
     ["../../packaging/org.fcitx.Fcitx5.desktop", "usr/share/vr-telex/", "644"],
     ["../../packaging/org.fcitx.Fcitx5.service", "usr/share/vr-telex/", "644"],
+    # apt source and its key (D-APT-3): postinst copies the source into
+    # /etc/apt/sources.list.d, postrm removes it; the key is used only through
+    # Signed-By. vr-telex.gpg is packaging/apt/vr-telex.asc dearmored
+    # (tests/deb/run.sh checks that they match).
+    ["../../packaging/deb/vr-telex.sources", "usr/share/vr-telex/", "644"],
+    ["../../packaging/deb/vr-telex.gpg", "usr/share/keyrings/", "644"],
     ["../../README.md", "usr/share/doc/vr-telex/", "644"],
     ["../../THIRD-PARTY-NOTICES.md", "usr/share/doc/vr-telex/", "644"],
 ]

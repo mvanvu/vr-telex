@@ -2,7 +2,19 @@
 # Runs as root under dpkg. Per-user files are never deleted here: they sit
 # in users' home directories and `vr-telex-setup --remove` restores the
 # settings they were backed up from.
+#
+# The apt source written by postinst goes on remove (not only on purge): its
+# keyring is a package file that dpkg deletes on remove, and a source without
+# its key makes every `apt update` fail. DPKG_ROOT: see postinst.
 set -e
+
+SOURCE_FILE="$DPKG_ROOT/etc/apt/sources.list.d/vr-telex.sources"
+
+case "$1" in
+remove | purge)
+  rm -f "$SOURCE_FILE" "$SOURCE_FILE.dpkg-new"
+  ;;
+esac
 
 case "$1" in
 purge)
