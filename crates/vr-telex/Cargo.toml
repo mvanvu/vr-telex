@@ -1,6 +1,8 @@
 [package]
 name = "vr-telex"
 version.workspace = true
+# Also the Debian package summary (cargo-deb reads it from here only).
+description = "Vietnamese Telex input method for GNOME (IBus and fcitx5 protocols)"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -17,3 +19,40 @@ rustix.workspace = true
 
 [lints]
 workspace = true
+
+# Debian package (AC-4). Paths follow the fixed-path contract in the APT plan;
+# asset sources are relative to this crate. `cargo deb -p vr-telex` builds it,
+# tests/deb/run.sh checks it.
+[package.metadata.deb]
+name = "vr-telex"
+revision = "1"
+# No personal address: the project page is the contact point.
+maintainer = "vr-telex project <https://github.com/mvanvu/vr-telex>"
+# A complete DEP-5 file (MIT text + the word list notice) used verbatim.
+license-file = "../../packaging/deb/copyright"
+section = "utils"
+priority = "optional"
+# gsettings/gdbus (libglib2.0-bin) and a systemd user manager with its
+# session bus are what vr-telex-setup and the user unit rely on.
+depends = "$auto, systemd, dbus-user-session, libglib2.0-bin"
+extended-description = """\
+Vietnamese Telex input method daemon for GNOME on Wayland and X11. It \
+serves IBus, fcitx5 and XIM clients from one systemd user service, keeps \
+the composing word inside the application and leaves English words alone.
+.
+After installing, each user runs vr-telex-setup once to enable it for \
+their session, and vr-telex-setup --remove to undo that before the \
+package is removed."""
+maintainer-scripts = "../../packaging/deb/"
+assets = [
+    ["target/release/vr-telex", "usr/bin/", "755"],
+    ["../../packaging/vr-telex-setup", "usr/bin/", "755"],
+    ["../../packaging/deb/vr-telex.service", "usr/lib/systemd/user/", "644"],
+    ["../../packaging/common.sh", "usr/share/vr-telex/", "644"],
+    ["../../packaging/90-vr-telex.conf", "usr/share/vr-telex/", "644"],
+    ["../../packaging/xinputrc", "usr/share/vr-telex/", "644"],
+    ["../../packaging/org.fcitx.Fcitx5.desktop", "usr/share/vr-telex/", "644"],
+    ["../../packaging/org.fcitx.Fcitx5.service", "usr/share/vr-telex/", "644"],
+    ["../../README.md", "usr/share/doc/vr-telex/", "644"],
+    ["../../THIRD-PARTY-NOTICES.md", "usr/share/doc/vr-telex/", "644"],
+]

@@ -1,0 +1,14 @@
+#!/bin/sh
+# Runs as root under dpkg. It only prints the next step: enabling vr-telex
+# changes per-user state (input sources, user unit, environment), which
+# belongs to each user's own `vr-telex-setup` run, never to the package.
+set -e
+
+case "$1" in
+configure)
+  echo "vr-telex: installed. Each user enables it by running 'vr-telex-setup'"
+  echo "vr-telex: as themselves (not root), then logging out and back in."
+  ;;
+esac
+
+exit 0

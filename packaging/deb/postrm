@@ -1,0 +1,16 @@
+#!/bin/sh
+# Runs as root under dpkg. Per-user files are never deleted here: they sit
+# in users' home directories and `vr-telex-setup --remove` restores the
+# settings they were backed up from.
+set -e
+
+case "$1" in
+purge)
+  echo "vr-telex: per-user files are kept (~/.local/share/vr-telex," >&2
+  echo "vr-telex: ~/.local/state/vr-telex, ~/.config/environment.d/90-vr-telex.conf)." >&2
+  echo "vr-telex: To restore a user's input settings, reinstall vr-telex and run" >&2
+  echo "vr-telex: 'vr-telex-setup --remove' as that user before purging." >&2
+  ;;
+esac
+
+exit 0

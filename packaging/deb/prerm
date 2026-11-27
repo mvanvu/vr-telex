@@ -1,0 +1,16 @@
+#!/bin/sh
+# Runs as root under dpkg. Per-user setup cannot be undone from here (it
+# lives in each user's session and settings), so removal only reminds users
+# to run `vr-telex-setup --remove` first; upgrades say nothing.
+set -e
+
+case "$1" in
+remove)
+  echo "vr-telex: users who ran 'vr-telex-setup' should run 'vr-telex-setup --remove'" >&2
+  echo "vr-telex: as themselves before the package is removed; it restores their" >&2
+  echo "vr-telex: input sources and fcitx5. To do it later, reinstall vr-telex," >&2
+  echo "vr-telex: run 'vr-telex-setup --remove', then remove the package again." >&2
+  ;;
+esac
+
+exit 0
