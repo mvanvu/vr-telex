@@ -63,6 +63,24 @@ The tone goes on the modern position (`hoà`, `thuý`). Upper case is kept per l
 (`Vieetj` → Việt). A word that cannot be Vietnamese (`class`, `https`, `git`) stays exactly
 as typed.
 
+### English words
+
+When a word ends (space, punctuation, Enter, focus change), the IME checks it once more:
+
+- a word that is only the start of a Vietnamese syllable goes back to the keys typed
+  (`use`, `user`, `two`, `aw`); words without a vowel keep their letters (`dd` → đ);
+- an English word whose Vietnamese form is not a real syllable goes back to the keys
+  typed, in the case typed;
+- a word that is both (`best` / bét, `list` / lít) follows the previous word in the same
+  field: after an English word it stays English (`the best`, `use the best`), otherwise it
+  stays Vietnamese (`rất bét`, or first in the field). A common English word typed as is
+  (`the`, `with`, `would`) counts as English; any other word typed as is (`ba`, `to`) does
+  not change the previous word's language; focus changes and toggles reset it.
+
+There is no setting and nothing to undo: retype the word if it came out wrong. The word
+lists are built into the binary (sources and licences in `tools/wordlists/README.md`
+and `THIRD-PARTY-NOTICES.md`); nothing is read or downloaded at run time.
+
 ## Known limits
 
 | Limit | Detail |

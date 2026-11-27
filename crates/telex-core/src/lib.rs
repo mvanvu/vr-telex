@@ -11,6 +11,8 @@
 
 use std::fmt;
 
+mod words;
+
 /// State of the word after a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -20,6 +22,35 @@ pub enum Outcome {
     /// syllable fits) or the text left by an undo-by-repeat. Further keys of
     /// this word are appended as typed.
     Invalid,
+}
+
+/// Language of a committed word, kept per input field to decide the next
+/// word that is both English and Vietnamese (AC-3). Holds no text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Lang {
+    #[default]
+    Unknown,
+    En,
+    Vi,
+}
+
+/// What to commit at the end of a word, and the language it counts as.
+/// Borrows the composer's own buffers. `Debug` hides the text (SEC-2).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Finished<'a> {
+    pub text: &'a str,
+    pub lang: Lang,
+}
+
+impl fmt::Debug for Finished<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Finished {{ <redacted len={}>, lang: {:?} }}",
+            self.text.chars().count(),
+            self.lang
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -316,6 +347,58 @@ impl Composer {
 
     pub fn is_empty(&self) -> bool {
         self.raw.is_empty()
+    }
+
+    /// What to commit at the end of the word, given the language of the
+    /// previous word in the same field. Does not change the composer;
+    /// [`Composer::text`] still returns what is shown. No allocation: the
+    /// result borrows the shown text or the raw keys, and the word lists are
+    /// searched only here.
+    ///
+    /// Vietnamese words (text differs from the keys):
+    /// - no vowel (`dd` → đ): the text, [`Lang::Vi`];
+    /// - not a complete syllable (`úe`, `tưo`, `ă`, `ươ`): the raw keys, [`Lang::En`];
+    /// - keys in the English list and text not in the Vietnamese list: the raw keys, [`Lang::En`];
+    /// - keys in the English list and text in the Vietnamese list: the raw keys
+    ///   with [`Lang::En`] when `prev` is [`Lang::En`], else the text with [`Lang::Vi`];
+    /// - otherwise the text, [`Lang::Vi`].
+    ///
+    /// Words whose text equals the keys commit unchanged. A common English word
+    /// that is rare in Vietnamese (`the`, `with`: the plain English list) gives
+    /// [`Lang::En`]; any other (`ba`, `to`) keeps `prev`, since it says nothing
+    /// about the language. An empty word also keeps `prev`.
+    ///
+    /// Passthrough words (no syllable fits, or after an undo by repeat) commit
+    /// the text shown: [`Lang::Vi`] when it has a Vietnamese letter (`viêts`),
+    /// [`Lang::En`] when it has letters (`class`, `as` from `ass`), else `prev`.
+    pub fn finish(&self, prev: Lang) -> Finished<'_> {
+        let text = self.text.as_str();
+        let raw = self.raw.as_str();
+        let keep = |lang| Finished { text, lang };
+        let restore = Finished {
+            text: raw,
+            lang: Lang::En,
+        };
+        if self.mode != Mode::Viet {
+            return keep(shown_lang(text, prev));
+        }
+        if text == raw {
+            let plain_en = !raw.is_empty() && words::is_plain_english(raw);
+            return keep(if plain_en { Lang::En } else { prev });
+        }
+        let Some(s) = parse(&self.letters, self.tone) else {
+            return restore;
+        };
+        if s.ns == self.letters.len() {
+            return keep(Lang::Vi);
+        }
+        if !is_complete(&self.letters, s) {
+            return restore;
+        }
+        if !words::is_english(raw) || (prev != Lang::En && words::is_vietnamese(text)) {
+            return keep(Lang::Vi);
+        }
+        restore
     }
 
     /// Forgets the word, overwriting the buffers first (best effort, SEC-4).
@@ -648,6 +731,35 @@ fn nucleus_ok(nuc: &[char], has_final: bool) -> bool {
             .chain(OPEN_LONG.iter())
             .chain(CLOSED.iter())
             .any(|p| fits(nuc, p))
+    }
+}
+
+/// The letters (already a valid prefix, nucleus `s`) form a whole syllable:
+/// the nucleus is one that can end the word as it stands, without a final
+/// (OPEN) or before the final typed (CLOSED). Exact match, so a nucleus still
+/// waiting for a mark (`ue` → uê, `uo` → ươ) or for a final (`ă`, `â`, `ươ`)
+/// is not complete.
+fn is_complete(letters: &[Letter], s: Syllable) -> bool {
+    if s.ns >= s.ne {
+        return false;
+    }
+    let nuc = || letters[s.ns..s.ne].iter().map(|l| l.ch);
+    let exact = |p: &&str| p.chars().eq(nuc());
+    if s.ne < letters.len() {
+        CLOSED.iter().any(exact)
+    } else {
+        OPEN.iter().chain(OPEN_LONG.iter()).any(exact)
+    }
+}
+
+/// Language of a passthrough word from the text it shows.
+fn shown_lang(text: &str, prev: Lang) -> Lang {
+    if text.chars().any(|c| !c.is_ascii() && c.is_alphabetic()) {
+        Lang::Vi
+    } else if text.chars().any(|c| c.is_ascii_alphabetic()) {
+        Lang::En
+    } else {
+        prev
     }
 }
 

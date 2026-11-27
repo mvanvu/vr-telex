@@ -3,7 +3,7 @@
 | ID | Task | Owner | Depends on | Tags | Rules | Files | Verify with | Status | Rounds |
 |----|------|-------|-----------|------|-------|-------|-------------|--------|--------|
 | E1 | Word lists: en.txt (English words the engine changes, from SCOWL/wamerican) + vi.txt (real Vietnamese syllables) + generator + provenance/licences | be | - | - | AC-6, AC-9 | crates/telex-core/data/en.txt, crates/telex-core/data/vi.txt, tools/wordlists/**, crates/telex-core/examples/wordfilter.rs, THIRD-PARTY-NOTICES.md | format checks in generator + counts in notes | done | 1 |
-| E2 | telex-core: `Lang`, `Composer::finish` (complete-syllable check, English restore, overlap by previous word) + tests + AC-7 measurement | be | E1 (relaxed: only the data format is consumed; E2 never edits data/** or tools/**) | - | AC-1, AC-2, AC-3, AC-4, AC-6, AC-7, SEC-2, SEC-4 | crates/telex-core/src/**, crates/telex-core/tests/** (not golden tsv content), README.md (short section) | cargo test -p telex-core --locked + guard | review | 0 |
+| E2 | telex-core: `Lang`, `Composer::finish` (complete-syllable check, English restore, overlap by previous word) + tests + AC-7 measurement | be | E1 (relaxed: only the data format is consumed; E2 never edits data/** or tools/**) | - | AC-1, AC-2, AC-3, AC-4, AC-6, AC-7, SEC-2, SEC-4 | crates/telex-core/data/en_plain.txt, .gitignore, tools/wordlists/README.md, crates/telex-core/src/**, crates/telex-core/tests/** (not golden tsv content), README.md (short section) | cargo test -p telex-core --locked + guard | done | 1 |
 | E3 | ime-core: per-context last language, finish at every word end, per-edit-mode commit, resets + tests | be | E2 | security | AC-4, AC-5, AC-6, AC-8, SEC-2, SEC-4, SEC-13, B3 | crates/ime-core/** | cargo test -p ime-core --locked, cargo test -p fe-ibus -p fe-fcitx --locked + guard | queued | 0 |
 
 ## Notes
@@ -20,3 +20,6 @@ decisions: see decisions.md
 eta: ~16:30 (set 14:24, basis: critical path E1 (~30) → E2 (~45) → E3 (~45) + sign-off qc + Phase 5 (~40), 1 agent at a time)
 E1 verdict gate (14:36): review FAIL, rule table present; high finding re-graded major (vi.txt only consulted for en.txt words; reviewer's AC-1 scenario does not apply — AC-1 is structural) but fix round 1 opened (cheap, list correctness). E2 continues: consumes format only.
 E1 re-check (14:39): PASS; committed below. Minor for report: add __pycache__/ to .gitignore (rides with E2 fix round); 98 engine-dropped tokens incl. thuở/huơ/boong (engine can't type).
+E2 (14:45): first developer stopped on an API content-filter error during the D10 step (no edits); fresh opus developer finished D10 (en_plain.txt 423 words, accepted over 'a few hundred'). DONE gate ok. Review started (sonnet).
+E2 verdict gate (14:46): review FAIL, rule table present, code correct; major on en_plain.txt (words in vi.txt). Fix round 1: rule 'en_plain ∩ vi.txt = {the}' + test. D8 (bass→bas) listed for the user on return.
+E2 re-check (14:48): PASS; committed. E3 starts.
