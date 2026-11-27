@@ -42,6 +42,8 @@ fn golden_syllables_in_the_vietnamese_list_are_unchanged() {
     let en: HashSet<&str> = en_data.lines().collect();
     let plain_data = read(&manifest("data/en_plain.txt"));
     let plain: HashSet<&str> = plain_data.lines().collect();
+    let both_data = read(&manifest("data/en_both.txt"));
+    let both: HashSet<&str> = both_data.lines().collect();
     let mut plain_hits = 0usize;
     let (mut in_vi, mut not_in_vi, mut not_in_vi_changed) = (0usize, 0usize, 0usize);
     let mut not_in_vi_changed_en = 0usize;
@@ -58,16 +60,19 @@ fn golden_syllables_in_the_vietnamese_list_are_unchanged() {
             let c = composed(word);
             let known = vi.contains(c.text().to_lowercase().as_str());
             let is_plain = plain.contains(word.to_ascii_lowercase().as_str());
+            let is_both = both.contains(word.to_ascii_lowercase().as_str());
+            let acronym = word.len() >= 2 && word.bytes().all(|b| b.is_ascii_uppercase());
             let mut changed = false;
             for prev in [Lang::Unknown, Lang::Vi] {
                 let f = c.finish(prev);
                 changed |= f.text != c.text();
-                // A word whose text equals its keys keeps the previous language,
-                // unless it is in the plain English list (D10).
-                let lang = match (c.text() == c.raw(), is_plain) {
-                    (true, true) => Lang::En,
-                    (true, false) => prev,
-                    (false, _) => Lang::Vi,
+                // A word whose text equals its keys: En when in the plain English
+                // list (D10), else prev for an all-caps word (D19), else Vi unless
+                // it is also an English word (D15).
+                let lang = match (c.text() == c.raw(), is_plain, is_both || acronym) {
+                    (true, true, _) => Lang::En,
+                    (true, false, true) => prev,
+                    _ => Lang::Vi,
                 };
                 if known && (f.text != c.text() || f.lang != lang) {
                     bad.push(format!("{word:?} prev {prev:?} -> {:?}", f.lang));

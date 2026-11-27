@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate crates/telex-core/data/en.txt and vi.txt (see tools/wordlists/README.md).
+"""Generate crates/telex-core/data/en.txt, vi.txt and en_both.txt (see tools/wordlists/README.md).
 
 en.txt: English words (SCOWL via the system wamerican list) whose Telex reading the
 engine changes (the cargo example `wordfilter` runs the real engine).
@@ -8,9 +8,12 @@ rule-valid shapes of tools/golden-gen/gen.py, merged with the syllable inventory
 from an optional Vietnamese word list (any, one word per line) given on the command line (never shipped), minus the forms
 that the English words produce and that are not real syllables (vi_overrides.py),
 validated against the engine.
+en_both.txt: syllables of vi.txt that Telex leaves unchanged and that are English words of the
+same wamerican list (D15).
 
 Usage (repo root):
   python3 -I tools/wordlists/gen.py [--viet-source WORDLIST] [--english PATH]
+  python3 -I tools/wordlists/gen.py --both-only [--english PATH]   (en_both.txt from the committed vi.txt)
 Standard library only (cargo is used for the engine filter); no network.
 """
 import importlib.util
@@ -51,12 +54,12 @@ def engine(mode, lines):
     return res.stdout.splitlines()
 
 
-def english_candidates(path):
+def english_candidates(path, min_len=2):
     out = set()
     with open(path, encoding="utf-8") as f:
         for line in f:
             w = line.rstrip("\n")
-            if len(w) >= 2 and re.fullmatch(r"[a-z]+", w):
+            if len(w) >= min_len and re.fullmatch(r"[a-z]+", w):
                 out.add(w)
     return sorted(out)
 
@@ -149,6 +152,7 @@ def check_format(items, ascii_only):
 def main():
     args = sys.argv[1:]
     src = None
+    both_only = False
     english = "/usr/share/dict/american-english"
     while args:
         a = args.pop(0)
@@ -156,8 +160,15 @@ def main():
             src = args.pop(0)
         elif a == "--english":
             english = args.pop(0)
+        elif a == "--both-only":
+            both_only = True
         else:
             sys.exit("unknown argument " + a)
+
+    if both_only:
+        with open(os.path.join(DATA, "vi.txt"), encoding="utf-8") as f:
+            write_both(f.read().splitlines(), english)
+        return
 
     cands = english_candidates(english)
     en_pairs = [l.split("\t") for l in engine("pairs", cands)]
@@ -209,6 +220,20 @@ def main():
     print("dropped by engine check %d: %s" % (len(dropped), " ".join(dropped)))
     print("vi.txt lines %d" % len(vi))
     print("sizes en.txt %d bytes, vi.txt %d bytes" % (os.path.getsize(en_path), os.path.getsize(vi_path)))
+    write_both(vi, english)
+
+
+def write_both(vi, english):
+    """en_both.txt: unaccented syllables of vi.txt that Telex leaves as typed and that are English
+    words (D15). One-letter words count (`a`, `i`): they are English words too."""
+    words = set(english_candidates(english, min_len=1))
+    plain = [s for s in vi if re.fullmatch(r"[a-z]+", s) and s in words]
+    changed = set(engine("changed", plain))
+    both = sorted((s for s in plain if s not in changed), key=lambda s: s.encode())
+    check_format(both, False)
+    path = write_list("en_both.txt", both)
+    print("en_both.txt lines %d (unaccented vi.txt syllables in the English list %d, changed by Telex %d), %d bytes"
+          % (len(both), len(plain), len(changed), os.path.getsize(path)))
 
 
 def reverse_keys(text):

@@ -1,6 +1,6 @@
 //! Word lists embedded at compile time, used only at the end of a word.
 //!
-//! Both files are sorted by byte order with one word per line (LF), so a
+//! All files are sorted by byte order with one word per line (LF), so a
 //! binary search over the text finds a line without building any index and
 //! without allocating. Lookups compare case-folded characters on the fly, so
 //! no folded copy of the typed word is ever made (SEC-4).
@@ -12,6 +12,9 @@ const EN: &str = include_str!("../data/en.txt");
 const EN_PLAIN: &str = include_str!("../data/en_plain.txt");
 /// Real Vietnamese syllables (lowercase, NFC, with tone and marks).
 const VI: &str = include_str!("../data/vi.txt");
+/// Vietnamese syllables that Telex leaves unchanged and that are also English
+/// words (lowercase ASCII, generated, D15).
+const EN_BOTH: &str = include_str!("../data/en_both.txt");
 
 /// `raw` (the keys typed) is in the English list, ignoring ASCII case.
 pub(crate) fn is_english(raw: &str) -> bool {
@@ -22,6 +25,12 @@ pub(crate) fn is_english(raw: &str) -> bool {
 /// ignoring ASCII case.
 pub(crate) fn is_plain_english(raw: &str) -> bool {
     contains(EN_PLAIN, raw.chars().map(|c| c.to_ascii_lowercase()))
+}
+
+/// `raw` (the keys typed) is an unchanged Vietnamese syllable that is also an
+/// English word, ignoring ASCII case.
+pub(crate) fn is_also_english(raw: &str) -> bool {
+    contains(EN_BOTH, raw.chars().map(|c| c.to_ascii_lowercase()))
 }
 
 /// `text` (the composed word) is in the Vietnamese list, ignoring case.
@@ -92,6 +101,8 @@ mod tests {
         assert!(!is_english("vieetj"));
         assert!(is_plain_english("The"));
         assert!(!is_plain_english("to"));
+        assert!(is_also_english("To"));
+        assert!(!is_also_english("cho"));
         assert!(is_vietnamese("Việt"));
         assert!(is_vietnamese("VIỆT"));
         assert!(!is_vietnamese("úe"));
@@ -113,7 +124,7 @@ mod tests {
 
     #[test]
     fn embedded_lists_are_sorted_and_unique() {
-        for list in [EN, EN_PLAIN, VI] {
+        for list in [EN, EN_PLAIN, EN_BOTH, VI] {
             let lines: Vec<&str> = list.lines().collect();
             assert!(lines.windows(2).all(|w| w[0] < w[1]));
             assert!(
