@@ -1,0 +1,41 @@
+name: test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends apt-utils dbus-daemon gpg gpgv shellcheck
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update
+
+      - name: Format and lint
+        run: |
+          cargo fmt --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Unit and integration tests
+        run: cargo test --workspace --locked
+
+      - name: Apt repository test
+        run: |
+          shellcheck tools/apt-repo/build.sh tests/apt/run.sh
+          bash tests/apt/run.sh

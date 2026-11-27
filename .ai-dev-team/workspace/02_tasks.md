@@ -3,9 +3,9 @@
 | ID | Task | Owner | Depends on | Tags | Rules | Files | Verify with | Status | Rounds |
 |----|------|-------|-----------|------|-------|-------|-------------|--------|--------|
 | A1 | Verify (user, 17:47: shrunk) that the merged tree meets AC-1/AC-2 (rename + migration already in abac0f3); leftovers only (e.g. stray tracked files) as a quick pass | be | - | security | AC-1, AC-2, SEC-19..24 | whole repo except .ai-dev-team/workspace_* (crates/vr-talex → crates/vr-telex via git mv) | cargo test --workspace --locked, tests/install/run.sh, guard | done | 1 |
-| A2 | Packaged per-user setup: `vr-telex-setup` / `--remove` reusing install/uninstall logic with /usr/bin/vr-telex and the system user unit; root refused | be | A1 | security | AC-3, AC-2 | install.sh, uninstall.sh, packaging/** (except packaging/apt/**), new packaging/vr-telex-setup, tests/install/** | tests/install/run.sh | queued | 0 |
+| A2 | Packaged per-user setup: `vr-telex-setup` / `--remove` reusing install/uninstall logic with /usr/bin/vr-telex and the system user unit; root refused | be | A1 | security | AC-3, AC-2 | install.sh, uninstall.sh, packaging/** (except packaging/apt/**), new packaging/vr-telex-setup, tests/install/** | tests/install/run.sh | in progress | 0 |
 | A3 | Debian package via cargo-deb: metadata, maintainer scripts, contents/control test | be | A1 (A2 relaxed: asset paths fixed by the plan) | - | AC-4 | crates/vr-telex/Cargo.toml ([package.metadata.deb] only), packaging/deb/**, tests/deb/** | tests/deb/run.sh | done | 0 |
-| A4 | Signed apt repo script + local apt test + release workflow + README apt section | be | A3 (relaxed: consumes only the .deb file name vr-telex_*_amd64.deb and tests/deb/run.sh VR_TELEX_DEB_STRICT; no edits to A3 files) | security | AC-5, AC-6, AC-7 | tools/apt-repo/**, .github/workflows/**, tests/apt/**, README.md (install section) | tests/apt/run.sh | in progress | 0 |
+| A4 | Signed apt repo script + local apt test + release workflow + README apt section | be | A3 (relaxed: consumes only the .deb file name vr-telex_*_amd64.deb and tests/deb/run.sh VR_TELEX_DEB_STRICT; no edits to A3 files) | security | AC-5, AC-6, AC-7 | tools/apt-repo/**, .github/workflows/**, tests/apt/**, README.md (install section) | tests/apt/run.sh | done | 1 |
 | M1 | Resolve the merge conflict in crates/telex-core/src/lib.rs (merge of origin/master 40c3f02 into local master): keep local 311dbe0 (tone undo at the tone position) and remote 32bb402 + EN-DETECT (mark undo continues the shown text, word-end language decision); both sides' tests green | be | - | - | AC-1 (old run), D37, D39, D40 | crates/telex-core/src/lib.rs only | cargo test -p telex-core --locked, cargo test -p ime-core --locked, guard | done | 0 |
 
 ## Notes
@@ -21,7 +21,7 @@ resume 17:32 (this machine, plugin 1.0.43, TEAM_BIN=/home/rainy/.claude/plugins/
 M1 model: opus (reason: semantic merge of two interacting undo fixes in the engine, not a marker removal).
 A1 overlap: local abac0f3 already renamed vr-talex → vr-telex with migration and tests/install scenarios, and the live machine was migrated (AC-1, AC-2, AC-8 part). Proposed to the user: A1 becomes a verification of AC-1/AC-2 on the merged tree plus the leftovers only.
 monitor: on (user, 17:30), plugin_src /home/rainy/DEV/ai-dev-team
-monitor-last: 17:34 (0 findings, 5 notes; plan: sonnet reviewer on M1 after DONE)
+monitor-last: 18:02 (1 plugin finding: guard matches words inside data — apply agent spawned; 1 note)
 M1 DONE gate 17:35: no markers, rule table present, guard clean, telex-core 64 + ime-core 69 tests pass; one change outside the hunks (ends_in_tone_undo uses undo_inserted). Reviewer: sonnet (engine logic, not high-risk).
 M1 verdict gate 17:36: sonnet REVIEW_PASS, rule check table present, 1 minor (BackSpace in Undone resets raw; no visible effect) for the report. M1 done; merge committed locally (commits: local, no push).
 A1 decision 17:47 (user): shrink A1 to verification of AC-1/AC-2 on the merged tree + leftovers.
@@ -39,3 +39,11 @@ A3 review 17:56: sonnet REVIEW_PASS, rule table ✓; minors: rerun tests/deb/run
 A1 round 1 DONE 17:58: 44 install scenarios 0 failed, guard ✓, rule table ✓; re-check sent to the opus reviewer. Open note for user report: reruns after a migration still put vr-telex first (D33).
 A3 qc 17:58: sonnet QC_PASS, rule table ✓; unverified until A2: content of /usr/bin/vr-telex-setup (rerun tests/deb/run.sh with VR_TELEX_DEB_STRICT=1 in A2). A3 done, committed.
 A1 re-check 17:59: opus REVIEW_PASS, rule table ✓. New minor: install.sh:504-506 reads legacy_was_current after stopping vr-talex (swap the two lines) → handed to A2 (owns install.sh next). A1 done, committed.
+A2 start 18:00: A1 committed (a31e480). parallel: A2 ∥ A4 — files disjoint (A2: install.sh, uninstall.sh, packaging/** except deb/ and apt/, tests/install/**; A4: tools/apt-repo, .github, tests/apt, README, packaging/apt). Developer opus (security tag).
+monitor landed 18:04: plugin e5a270b (not pushed, installed 1.0.43 still old) — guard ignores words in grep patterns / notes heredocs. Run rule until reload: such a denial is a false positive; write notes with Edit, read grep patterns from a file (grep -f); never reword a pattern to pass the guard. Added to later briefs.
+A4 DONE gate 18:07: rule table ✓, guard ✓, tests/apt 42 ok; deviations (binary vr-telex.gpg published, file: source in test, 2 README lines) to review. Leader stopped the gpg-agent of the real key's GNUPGHOME (started by the leader's keygen). Reviewer opus (security), qc sonnet.
+A4 qc 18:08: sonnet QC_PASS, rule table ✓; unverified: real-.deb apt run (needs A2's packaging/vr-telex-setup → rerun at sign-off), live GitHub workflow run (needs push). Waiting on A4 review.
+A4 review 18:09: opus REVIEW_FAIL, rule table ✓ — 1 major (README fingerprint check after the install block), minors (duplicate file names in build.sh, key renewal not documented, file: source), low Valid-Until → user (report). Round 1 opened 18:09 to the same developer; qc not re-run (README + build.sh guard only; reviewer re-checks).
+A4 round 1 DONE 18:12: 47 checks PASS, shellcheck + guard clean; re-check sent to the opus reviewer.
+A4 re-check 18:13: opus REVIEW_PASS, rule table ✓. A4 done, committed. For the report: Valid-Until (user decision), single-fingerprint check must change if a subkey is ever added.
+A4 commit: capabilities.md holds an A2 line too → its A4 line is committed with A2.

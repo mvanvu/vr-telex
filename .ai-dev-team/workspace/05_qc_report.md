@@ -41,3 +41,25 @@ Commit e14cbc2 + uncommitted A3 files. Engine: shell (tests/deb/run.sh, dpkg-deb
 | No install / no sudo | respected |
 
 QC_PASS A3 (AC-4 fully re-verify with strict mode once A2's packaging/vr-telex-setup exists)
+
+## QC A4
+HEAD a31e480 + uncommitted A4 files (tools/apt-repo/build.sh, tests/apt/run.sh, .github/workflows/{test,release}.yml, packaging/apt/vr-telex.asc, README install section). Engines: bash, apt-get/apt-cache via throwaway root, gpg/gpgv, PyYAML. No browser needed.
+
+- AC-5: `run-heavy.sh tests/apt/run.sh` -> rc 0, PASS (log qa-artifacts/A4/qc_run1.log). Independently seen in the output: "apt-get update with signed-by keyring passes the signature check", "apt-get update without the keyring is refused (NO_PUBKEY, not signed)" + no candidate, "with another key is refused", tampered Packages / InRelease refused, old version kept, candidate = newest.
+- AC-5 with real committed package: `cargo deb -p vr-telex --locked` fails only because packaging/vr-telex-setup is missing at that moment (A2 in flight): "Can't resolve asset ... packaging/vr-telex-setup -> usr/bin/" (qa-artifacts/A4/qc_deb.log). Not an A4 defect; fake-deb run is the AC-5 evidence. Real-.deb run: unverified, re-run after A2 (CI release job also runs it).
+- AC-6 static: both YAML files parse; release trigger push tags `v*`; test trigger push master + pull_request; permissions: top `contents: read`, build `contents: read`, publish `contents: write` only; all 4 `uses:` pinned by 40-hex SHA (checkout, upload-artifact, download-artifact); only secrets referenced: APT_GPG_PRIVATE_KEY, APT_GPG_PASSPHRASE (publish job step env only); no `set -x`; key unset after import; temp GNUPGHOME cleaned by trap; signing key tied to committed .asc fingerprint. Live run on GitHub: unverified: needs push.
+- AC-7 by reading: commands exact and consistent (keyring /etc/apt/keyrings/vr-telex.gpg, signed-by line with arch=amd64, `stable main`, update, install, vr-telex-setup); fingerprint in README 2C30E91F97E5A566BEFF373736C30B9165329B85 == `gpg --show-keys packaging/apt/vr-telex.asc` (RSA 4096, no secret block); URL matches origin mvanvu/vr-telex Pages; remove order `vr-telex-setup --remove` then `sudo apt remove vr-telex`, then source + keyring removal; `--remove` exists in packaging/vr-telex-setup. Gap (minor): the README tells the user to compare the fingerprint but the pipeline's `wget` step is not gated; informational only.
+- Nothing installed, no sudo, real key dir untouched.
+
+## Rule check A4
+| Check | Result |
+|---|---|
+| AC-5 local signed apt update passes with keyring / fails without | pass (fake debs) |
+| AC-5 real cargo-deb .deb run | unverified: build blocked by A2 in flight (packaging/vr-telex-setup missing) |
+| AC-6 YAML/triggers/permissions/SHA pins/secret names | pass |
+| AC-6 live workflow run | unverified: needs push |
+| AC-7 README commands, fingerprint, remove order | pass |
+| No secrets in repo / private key untouched | pass |
+| No install / no sudo / no code edits | respected |
+
+QC_PASS A4

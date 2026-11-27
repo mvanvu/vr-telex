@@ -16,6 +16,57 @@ user service for the current user only.
 
 ## Install
 
+### With apt (Ubuntu 24.04+, amd64)
+
+First download the repository key and check it. The last line checks that the file
+holds exactly one key, with fingerprint `2C30E91F97E5A566BEFF373736C30B9165329B85`;
+otherwise it prints `vr-telex: wrong key, stopping`, deletes the file and fails. Do not
+go on in that case.
+
+```sh
+sudo install -d -m 0755 /etc/apt/keyrings
+sudo wget -qO /etc/apt/keyrings/vr-telex.gpg https://mvanvu.github.io/vr-telex/vr-telex.gpg
+[ "$(gpg --show-keys --with-colons /etc/apt/keyrings/vr-telex.gpg 2>/dev/null | grep "^fpr")" = "fpr:::::::::2C30E91F97E5A566BEFF373736C30B9165329B85:" ] || { echo "vr-telex: wrong key, stopping" >&2; sudo rm -f /etc/apt/keyrings/vr-telex.gpg; false; }
+```
+
+Then add the repository, install the package and turn it on for your user:
+
+```sh
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/vr-telex.gpg] https://mvanvu.github.io/vr-telex stable main" |
+  sudo tee /etc/apt/sources.list.d/vr-telex.list
+sudo apt update
+sudo apt install vr-telex
+vr-telex-setup
+```
+
+The same public key is in this repository at `packaging/apt/vr-telex.asc`. apt checks the
+repository signature with this key only (`signed-by`); it is not added to the keys apt
+trusts for other repositories.
+
+The package installs files system-wide (`/usr/bin/vr-telex`, `/usr/bin/vr-telex-setup`,
+the `vr-telex.service` user unit) and does not touch running sessions. `vr-telex-setup`
+does the per-user part, as your own user without `sudo`: it starts `vr-telex.service`,
+sets the input sources and saves the previous setup, as `./install.sh` does below. Each
+user who wants vr-telex runs it once.
+
+**Update:** `sudo apt update && sudo apt upgrade`, then
+`systemctl --user restart vr-telex.service` to run the new version now (otherwise it starts
+at the next login). If `apt update` reports `EXPKEYSIG` for vr-telex, the repository key was
+renewed: run the first block above again (same fingerprint, so the check still passes).
+
+**Remove:** first undo the per-user setup while the package is still installed, then remove
+the package:
+
+```sh
+vr-telex-setup --remove
+sudo apt remove vr-telex
+```
+
+To drop the repository as well: `sudo rm /etc/apt/sources.list.d/vr-telex.list
+/etc/apt/keyrings/vr-telex.gpg`.
+
+### From source
+
 ```sh
 git clone https://github.com/mvanvu/vr-telex.git
 cd vr-telex
@@ -34,17 +85,19 @@ Run it as your own user: no `sudo`, no logout. It:
 
 If the daemon does not come up healthy, install rolls everything back and exits
 non-zero. Running it again changes no file; it only restarts the daemon (about 1 s).
+Use one install kind per user: run `./uninstall.sh` before switching to the apt package,
+or `vr-telex-setup --remove` before switching back.
 
 ### Upgrading from vr-talex
 
 The project was first published as `vr-talex`. If that install is present, `./install.sh`
-moves it to `vr-telex` automatically: it stops and removes `vr-talex.service`, moves the
-saved setup from `~/.local/share/vr-talex/backup/` to `~/.local/share/vr-telex/backup/`
-(so `./uninstall.sh` still restores the setup from before vr-talex), renames the input
-source in place so Vietnamese (Telex) stays selected, and keeps your VI/EN mode. Files at
-vr-talex paths that are not what the vr-talex installer wrote are left in place with a
-warning. If the new daemon does not come up, the vr-talex install is put back and started
-again. `./uninstall.sh` also removes a vr-talex install directly.
+and `vr-telex-setup` move it to `vr-telex` automatically: they stop and remove
+`vr-talex.service`, move the saved setup from `~/.local/share/vr-talex/backup/` to
+`~/.local/share/vr-telex/backup/` (so uninstalling still restores the setup from before
+vr-talex), rename the input source in place so Vietnamese (Telex) stays selected, and keep
+your VI/EN mode. Files at vr-talex paths that are not what the vr-talex installer wrote are
+left in place with a warning. If the new daemon does not come up, the vr-talex install is
+put back and started again. `./uninstall.sh` also removes a vr-talex install directly.
 
 ## Usage
 
