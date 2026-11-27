@@ -66,3 +66,4 @@ FR-13 (13:50): light tier, sonnet developer then sonnet reviewer, no qc (engine-
 FR-13 verdict gate (13:51): developer DONE gate ok (rule table + guard clean, leader probe re-run matches D39); sonnet review PASS with rule check table; 1 minor (missing test rows tuwswa/WWa/ddd<d) — for the report.
 FR-13 quick pass 1 (14:08): D40 (www → www) from user; then commit locally + install.sh from the commit (user approved 14:08). User report 14:04 'toool' = stale daemon from 09:40 (current tree gives tool).
 FR-13 re-check (14:10): sonnet reviewer PASS on quick pass 1, rule rows D40 D39 D37 AC-1 pass.
+FR-13 committed 32bb402 (14:09); installed from a clean detached worktree of 32bb402, daemon active since 14:09:31, ~/.local/bin/vr-talex 14:09. Board/decisions updates after this line are uncommitted.
