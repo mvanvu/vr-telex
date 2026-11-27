@@ -148,3 +148,29 @@ Engines: bash, shellcheck 0.9.0, python3 -I yaml, cargo-deb (qa-tools). No brows
 | Flaky tests | none |
 
 QC_PASS
+
+## QC B1 (D-APT-2: install by script from the latest release)
+Engines: shell only (no UI). Logs in $TEAM_WS/qa-artifacts/B1/qc/, e2e in qa-artifacts/B1/e2e/ (run.sh, ../e2e.log).
+- `bash tests/get/run.sh` via run-heavy: rc 0, 130 ok, 0 FAIL, PASS.
+- `VR_TELEX_DEB_STRICT=1 bash tests/deb/run.sh` via run-heavy (PATH with cargo-deb): rc 0, PASS (first try without cargo-deb on PATH failed with "cargo-deb not found": environment, rerun with the qa-tools PATH).
+- `cargo test --workspace --locked` via run-heavy: rc 0, every "test result" line ok, 0 failed.
+- test.yml lint block as written: cargo fmt --check rc 0; `shellcheck -x <8 scripts + tests>` rc 0; `shellcheck -x -S warning -e SC2034,SC2174 packaging/common.sh` rc 0. YAML: release.yml, test.yml parse.
+- Independent e2e of the real packaging/get/vr-telex-install.sh (throwaway ed25519 key, dpkg-deb fake 9.9.9 deb, SHA256SUMS + detached sig, python3 -I http.server 127.0.0.1:18765, VR_TELEX_RELEASE_URL/VR_TELEX_TEST_KEY, stub sudo/apt/vr-telex-setup/dpkg-query logging only):
+  - install: rc 0; calls = `sudo apt install -y <TMPDIR>/vr-telex-install.XXXXXX/vr-telex_9.9.9_amd64.deb` then `vr-telex-setup`; temp leftovers 0.
+  - up to date (installed 9.9.9): "already up to date", rc 0, no sudo/apt/setup calls, leftovers 0.
+  - tampered .deb: "sha256 ... does not match", rc 1, no calls, leftovers 0.
+  - tampered SHA256SUMS: gpgv BAD signature, rc 1, no calls, leftovers 0.
+  - server stopped, gpg-agent of throwaway home killed; no real sudo/apt, nothing installed, vr-telex-apt-gnupg untouched.
+- README: install/update/remove lines match D-APT-2 exactly (wget -qO /tmp/vr-telex-install.sh <latest url> && sh ...; `vr-telex-update`; `vr-telex-setup --remove` then `sudo apt remove vr-telex`). grep for apt repo / github pages / gh-pages / sources.list over README.md, workflows, scripts: none, except RELEASING.md lines 101-108, the intentional one-time "turn Pages off, delete gh-pages and its ruleset" cleanup step (informational, not a defect). Version 0.1.1 in Cargo.toml.
+
+## Rule check B1
+| Rule | Result |
+|---|---|
+| security: signature verified (gpgv, pinned key) before sudo | PASS (tamper cases) |
+| security: sha256 check before sudo; no sudo on any refusal | PASS |
+| security: temp dir removed on every path | PASS (0 leftovers x4) |
+| AC-3/4/6/7 as amended by D-APT-2 | PASS |
+| apt repo / Pages removed from docs and workflows | PASS |
+| BASE-14/15/17 (no polling, own processes only, no data left) | PASS |
+
+QC_PASS B1

@@ -161,6 +161,7 @@ EXPECTED="$TMP/expected"
 {
   echo "-rwxr-xr-x 0/0 ./usr/bin/vr-telex"
   echo "-rwxr-xr-x 0/0 ./usr/bin/vr-telex-setup"
+  echo "-rwxr-xr-x 0/0 ./usr/bin/vr-telex-update"
   echo "-rw-r--r-- 0/0 ./usr/lib/systemd/user/vr-telex.service"
   for f in "${SHARE_FILES[@]}"; do echo "-rw-r--r-- 0/0 ./usr/share/vr-telex/$f"; done
   for f in README.md THIRD-PARTY-NOTICES.md copyright; do
@@ -194,6 +195,7 @@ is_x86_64_elf() {
 }
 check "usr/bin/vr-telex is an x86-64 ELF executable" is_x86_64_elf "$X/usr/bin/vr-telex"
 same usr/bin/vr-telex-setup packaging/vr-telex-setup
+same usr/bin/vr-telex-update packaging/get/vr-telex-install.sh
 for f in "${SHARE_FILES[@]}"; do same "usr/share/vr-telex/$f" "packaging/$f"; done
 same usr/share/doc/vr-telex/README.md README.md
 same usr/share/doc/vr-telex/THIRD-PARTY-NOTICES.md THIRD-PARTY-NOTICES.md

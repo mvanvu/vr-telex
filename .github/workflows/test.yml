@@ -28,7 +28,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends apt-utils dbus-daemon gpg gpgv shellcheck \
+          sudo apt-get install -y -q --no-install-recommends dbus-daemon gpg gpgv shellcheck wget curl \
             libglib2.0-bin gsettings-desktop-schemas python3-gi gir1.2-glib-2.0
           rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update
 
@@ -40,7 +40,8 @@ jobs:
         run: |
           cargo fmt --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
-          shellcheck -x tools/apt-repo/build.sh tests/apt/run.sh tests/deb/run.sh install.sh uninstall.sh \
+          shellcheck -x packaging/get/vr-telex-install.sh packaging/get/embed-key.sh tests/get/run.sh \
+            tests/deb/run.sh install.sh uninstall.sh \
             packaging/vr-telex-setup packaging/deb/postinst packaging/deb/prerm packaging/deb/postrm
           shellcheck -x -S warning -e SC2034,SC2174 packaging/common.sh
 
@@ -50,5 +51,5 @@ jobs:
       - name: Install and setup scenarios
         run: bash tests/install/run.sh
 
-      - name: Apt repository test
-        run: bash tests/apt/run.sh
+      - name: Install script test
+        run: bash tests/get/run.sh

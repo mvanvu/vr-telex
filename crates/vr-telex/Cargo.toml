@@ -47,6 +47,8 @@ maintainer-scripts = "../../packaging/deb/"
 assets = [
     ["target/release/vr-telex", "usr/bin/", "755"],
     ["../../packaging/vr-telex-setup", "usr/bin/", "755"],
+    # Same file as the release install script: updates to the latest release.
+    ["../../packaging/get/vr-telex-install.sh", "usr/bin/vr-telex-update", "755"],
     ["../../packaging/deb/vr-telex.service", "usr/lib/systemd/user/", "644"],
     ["../../packaging/common.sh", "usr/share/vr-telex/", "644"],
     ["../../packaging/90-vr-telex.conf", "usr/share/vr-telex/", "644"],

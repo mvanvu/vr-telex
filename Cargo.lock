@@ -67,7 +67,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "fe-fcitx"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures-core",
  "ime-core",
@@ -79,7 +79,7 @@ dependencies = [
 
 [[package]]
 name = "fe-ibus"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fe-ibus",
  "ime-core",
@@ -90,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "fe-xim"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ime-core",
 ]
@@ -144,7 +144,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "ime-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "telex-core",
  "tokio",
@@ -345,7 +345,7 @@ dependencies = [
 
 [[package]]
 name = "telex-core"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "tempfile"
@@ -418,7 +418,7 @@ dependencies = [
 
 [[package]]
 name = "vr-telex"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fe-fcitx",
  "fe-ibus",
