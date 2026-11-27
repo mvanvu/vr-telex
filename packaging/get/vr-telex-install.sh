@@ -1,9 +1,8 @@
 #!/bin/sh
 # Install or update vr-telex from the latest GitHub release (amd64).
 #
-#   Install: wget -qO /tmp/vr-telex-install.sh \
-#              https://github.com/mvanvu/vr-telex/releases/latest/download/vr-telex-install.sh &&
-#            sh /tmp/vr-telex-install.sh
+#   Install: wget -qO- \
+#              https://github.com/mvanvu/vr-telex/releases/latest/download/vr-telex-install.sh | sh
 #   Update:  vr-telex-update   (this same script, installed by the package)
 #
 # Run it as your own user; it uses sudo only for `apt install`. It downloads

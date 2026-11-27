@@ -99,7 +99,7 @@ check "embed-key.sh writes the key back (result equals the committed script)" em
 
 readme_has() { grep -qxF -- "$1" "$REPO/README.md"; }
 check "README: install line" readme_has \
-  "wget -qO /tmp/vr-telex-install.sh $OFFICIAL_URL/vr-telex-install.sh && sh /tmp/vr-telex-install.sh"
+  "wget -qO- $OFFICIAL_URL/vr-telex-install.sh | sh"
 check "README: update command" readme_has "vr-telex-update"
 check "README: remove commands" readme_has "vr-telex-setup --remove"
 no_apt_repo_left() { ! grep -qE 'github\.io|gh-pages|sources\.list|keyrings' "$REPO/README.md"; }

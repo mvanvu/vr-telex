@@ -9,3 +9,4 @@ D3 (user, 16:24) — A new GPG key only for this repository; the user puts the p
 - GitHub Pages / apt repo dropped entirely (user picked "Bỏ hẳn repo apt"): disable Pages, delete gh-pages, remove tools/apt-repo, tests/apt, gh-pages publish, README apt section.
 - Download check (user did not pick an option; leader took the recommended one, confirm-on-return not needed — user present, told in the message): SHA256SUMS signed with the existing release key (fpr 2C30E91F…5329B85), public key embedded in the script, verified with gpgv before sudo.
 - Supersedes AC-5 (apt repo) and the apt parts of AC-6/AC-7 of 01_spec.md.
+- D-APT-2 update (20:25, user): README install line is the pipe form `wget -qO- https://github.com/mvanvu/vr-telex/releases/latest/download/vr-telex-install.sh | sh`.

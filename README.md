@@ -21,8 +21,12 @@ user service for the current user only.
 Run as your own user, without `sudo`:
 
 ```sh
-wget -qO /tmp/vr-telex-install.sh https://github.com/mvanvu/vr-telex/releases/latest/download/vr-telex-install.sh && sh /tmp/vr-telex-install.sh
+wget -qO- https://github.com/mvanvu/vr-telex/releases/latest/download/vr-telex-install.sh | sh
 ```
+
+The script is piped into `sh`. To read it first, download it with
+`wget -qO vr-telex-install.sh https://github.com/mvanvu/vr-telex/releases/latest/download/vr-telex-install.sh`
+and run `sh vr-telex-install.sh`.
 
 The script downloads the latest release's `SHA256SUMS`, its signature `SHA256SUMS.asc`
 and the `.deb` into a temp dir, checks the signature against the release key built into
