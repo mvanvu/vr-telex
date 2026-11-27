@@ -582,6 +582,23 @@ legacy_stop_unit() {
   return 0
 }
 
+# The vr-talex (or an already renamed vr-telex) source is the current one:
+# the head of mru-sources, or, with mru-sources empty, the head of sources
+# (what gnome-shell activates then). Read before the rename, so the move
+# can keep another current source current (AC-2).
+legacy_was_current() {
+  local key v
+  for key in mru-sources sources; do
+    v=$(gs_get "$key") || return 1
+    case "$v" in
+      "[$LEGACY_SOURCE"* | "[$VR_SOURCE"*) return 0 ;;
+      "@a(ss) []" | "[]") ;;
+      *) return 1 ;;
+    esac
+  done
+  return 1
+}
+
 # A source list with the vr-talex entry renamed in place, so the order and
 # the other entries stay; dropped instead when vr-telex is listed already.
 legacy_renamed_sources() {

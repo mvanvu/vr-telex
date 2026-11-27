@@ -25,7 +25,8 @@ SCENARIOS=(fresh_fcitx5 fresh_no_fcitx5 empty_sources broken_daemon root_refused
   reselect_rerun_failure reselect_keeps_user_edits
   legacy_migrate legacy_rollback legacy_both_dirs legacy_foreign_file foreign_legacy_name_only
   uninstall_legacy legacy_without_backup legacy_source_only
-  legacy_rollback_restore_fails legacy_backup_rm_fails legacy_rollback_default_key)
+  legacy_rollback_restore_fails legacy_backup_rm_fails legacy_rollback_default_key
+  legacy_source_order legacy_runtime_cleanup uninstall_legacy_runtime_cleanup legacy_newer_mode)
 # A HOME with a space, an ampersand and a quote (special_home scenario).
 SPECIAL_HOME_NAME="h o&m'e"
 
@@ -1288,6 +1289,117 @@ t_legacy_rollback_default_key() {
   check "keyfile byte-identical to before the run" cmp "$T8_SANDBOX/legacy.keyfile" "$(keyfile)"
 }
 
+t_legacy_source_order() {
+  # AC-2: the vr-talex entry is renamed at its own index (here the first of
+  # three) and the current source stays current: English was selected (head
+  # of mru-sources), so it still is after the move.
+  pre_state_fcitx5
+  check "vr-talex installer exits 0" legacy_install
+  gsettings set org.gnome.desktop.input-sources sources "[('ibus', 'vr-talex'), ('xkb', 'us'), ('xkb', 'fr')]"
+  gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'us'), ('ibus', 'vr-talex'), ('xkb', 'fr')]"
+  local out rc=0
+  out=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install exits 0" [ "$rc" = 0 ]
+  check "says it moved the vr-talex install" grep -q 'moved the vr-talex install to vr-telex' <<<"$out"
+  check "sources: renamed at index 0, others in order" \
+    [ "$(gs sources)" = "[('ibus', 'vr-telex'), ('xkb', 'us'), ('xkb', 'fr')]" ]
+  check "mru-sources: English still current, vr-telex at its old place" \
+    [ "$(gs mru-sources)" = "[('xkb', 'us'), ('ibus', 'vr-telex'), ('xkb', 'fr')]" ]
+  check "does not claim to have put vr-telex first" sh -c '! printf "%s" "$1" | grep -q "first"' _ "$out"
+  legacy_files_gone
+  no_migration_leftovers
+  check "vr-telex unit active" systemctl --user is-active --quiet vr-telex.service
+  check "IBus address file holds the daemon pid" \
+    addr_file_pid_is "$(systemctl --user show -p MainPID --value vr-telex.service)"
+  # The lists differ from what the vr-talex installer recorded, so uninstall
+  # keeps the user's lists and takes out only vr-telex (gs_restore).
+  check "uninstall exits 0" run_uninstall
+  check "sources after uninstall" [ "$(gs sources)" = "[('xkb', 'us'), ('xkb', 'fr')]" ]
+  check "mru-sources after uninstall" [ "$(gs mru-sources)" = "[('xkb', 'us'), ('xkb', 'fr')]" ]
+  expect_no_vr_telex_left
+}
+
+# Leftovers of a vr-talex daemon that died without cleaning up: an address
+# file for another display pointing into its runtime dir, its lock and
+# socket, plus an address file of another daemon that must stay. With
+# "foreign", a file of someone else's in the runtime dir too.
+plant_legacy_runtime() {
+  local mid busdir="$XDG_CONFIG_HOME/ibus/bus" rt="$XDG_RUNTIME_DIR/vr-talex"
+  mid=$(gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
+    --method org.freedesktop.DBus.Peer.GetMachineId)
+  mid=${mid#*\'}
+  mid=${mid%%\'*}
+  mkdir -p "$busdir" "$rt"
+  printf 'IBUS_ADDRESS=unix:path=%s/ibus\nIBUS_DAEMON_PID=999999\n' "$rt" >"$busdir/$mid-unix-:1"
+  printf 'IBUS_ADDRESS=unix:path=%s/other-ime/ibus\nIBUS_DAEMON_PID=1\n' "$XDG_RUNTIME_DIR" >"$busdir/$mid-unix-:2"
+  : >"$rt/ibus.lock"
+  : >"$rt/ibus"
+  if [ "${1:-}" = foreign ]; then printf 'keep\n' >"$rt/notes.txt"; fi
+  LEGACY_ADDR=$busdir/$mid-unix-:1
+  OTHER_ADDR=$busdir/$mid-unix-:2
+}
+
+expect_legacy_runtime_cleaned() {
+  local rt="$XDG_RUNTIME_DIR/vr-talex"
+  check "stale vr-talex address file removed" [ ! -e "$LEGACY_ADDR" ]
+  check "another daemon's address file kept" grep -qx 'IBUS_DAEMON_PID=1' "$OTHER_ADDR"
+  check "vr-talex ibus.lock removed" [ ! -e "$rt/ibus.lock" ]
+  check "vr-talex ibus socket removed" [ ! -e "$rt/ibus" ]
+  if [ "${1:-}" = foreign ]; then
+    check "a foreign file in the runtime dir is kept" grep -qx keep "$rt/notes.txt"
+    check "the runtime dir holding it is kept" [ -d "$rt" ]
+  else
+    check "the emptied runtime dir is removed" [ ! -e "$rt" ]
+  fi
+}
+
+t_legacy_runtime_cleanup() {
+  # AC-2: install over vr-talex removes its runtime address files and its
+  # own runtime entries, and nothing else there.
+  pre_state_fcitx5
+  check "vr-talex installer exits 0" legacy_install
+  plant_legacy_runtime foreign
+  local out rc=0
+  out=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install exits 0" [ "$rc" = 0 ]
+  expect_legacy_runtime_cleaned foreign
+  legacy_files_gone
+  expect_installed
+}
+
+t_uninstall_legacy_runtime_cleanup() {
+  # The same leftovers through uninstall.sh on a vr-talex install.
+  pre_state_fcitx5
+  check "vr-talex installer exits 0" legacy_install
+  plant_legacy_runtime
+  local out rc=0
+  out=$(run_uninstall 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "uninstall exits 0" [ "$rc" = 0 ]
+  expect_legacy_runtime_cleaned
+  legacy_files_gone
+  expect_no_vr_telex_left
+}
+
+t_legacy_newer_mode() {
+  # AC-2 "no overwrite of existing newer data": a vr-telex mode file present
+  # before the move wins over the vr-talex one, which is removed.
+  pre_state_fcitx5
+  check "vr-talex installer exits 0" legacy_install
+  mkdir -p "$XDG_STATE_HOME/vr-talex" "$XDG_STATE_HOME/vr-telex"
+  printf 'EN\n' >"$XDG_STATE_HOME/vr-talex/mode"
+  printf 'VI\n' >"$XDG_STATE_HOME/vr-telex/mode"
+  local out rc=0
+  out=$(run_install 2>&1) || rc=$?
+  printf '%s\n' "$out"
+  check "install exits 0" [ "$rc" = 0 ]
+  check "the newer vr-telex mode (VI) is kept" [ "$(cat "$XDG_STATE_HOME/vr-telex/mode" 2>/dev/null)" = VI ]
+  check "the vr-talex mode file is removed" [ ! -e "$XDG_STATE_HOME/vr-talex/mode" ]
+  legacy_files_gone
+  expect_installed
+}
 
 in_sandbox() {
   local name=$1

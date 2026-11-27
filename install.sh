@@ -30,6 +30,9 @@ RERUN=0
 # user keeps a working Vietnamese input method (see restore_legacy).
 MIGRATING=0
 MIG_SNAP=''
+# Set by migrate_live when the renamed source is listed but was not the
+# current one: the move then keeps the user's selection (AC-2).
+MIG_KEEP_SELECTION=0
 # Set when restore_legacy failed: the snapshot is then the only full copy of
 # the vr-talex install and is kept.
 KEEP_SNAP=0
@@ -498,8 +501,13 @@ plan_migration() {
 # vr-talex (it owns the same D-Bus names), rename its input source in place
 # and carry its VI/EN mode over.
 migrate_live() {
+  local was_current=0
   legacy_stop_unit || die "could not stop $LEGACY_UNIT"
+  legacy_was_current && was_current=1
   legacy_rename_sources || die "could not rename the vr-talex input source"
+  case "$(gs_get sources)" in
+    *"$VR_SOURCE"*) [ "$was_current" = 1 ] || MIG_KEEP_SELECTION=1 ;;
+  esac
   local old=$LEGACY_DAEMON_STATE_DIR/mode
   if [ -f "$old" ] && [ ! -L "$old" ] && [ ! -L "$LEGACY_DAEMON_STATE_DIR" ] && ! exists "$DAEMON_STATE_DIR/mode"; then
     mkdir -p -m 0700 -- "$DAEMON_STATE_DIR" && cp -p -- "$old" "$DAEMON_STATE_DIR/mode" ||
@@ -542,7 +550,11 @@ main() {
   install_files
   if [ "$MIGRATING" = 1 ]; then migrate_live; fi
   hand_over_fcitx5
-  select_source
+  if [ "$MIG_KEEP_SELECTION" = 1 ]; then
+    say "kept the current input source; Vietnamese (Telex) stays where vr-talex was in the list"
+  else
+    select_source
+  fi
   start_daemon
   health_check
   ROLLBACK=0
