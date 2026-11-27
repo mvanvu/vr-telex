@@ -321,7 +321,10 @@ impl Ime {
         };
         if Edit::of(ctx.caps) != Edit::of(caps) {
             let mut out = std::mem::take(&mut ctx.pending);
-            ctx.flush(&mut out);
+            // No key drives this, so the cursor may be elsewhere: a
+            // surrounding-text client keeps the shown word (D13, D17). `last`
+            // stays: the field and the cursor did not change.
+            ctx.flush_away(&mut out);
             ctx.pending = out;
         }
         ctx.caps = caps;
@@ -455,6 +458,13 @@ impl Ime {
                     handled: true,
                     actions,
                 }
+            }
+            KeyClass::BackSpace => {
+                // The client deletes text this context no longer tracks, so
+                // the previous word may be gone (D16).
+                ctx.flush(&mut actions);
+                ctx.last = Lang::Unknown;
+                pass(actions)
             }
             _ => {
                 ctx.flush(&mut actions);

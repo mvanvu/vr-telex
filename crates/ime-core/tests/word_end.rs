@@ -125,7 +125,7 @@ fn every_word_end_event_commits_the_finished_text() {
     for caps in MODES {
         let want = word_end(caps, "bét", "best");
         // Away from the keyboard the cursor may have moved already: a
-        // surrounding-text client keeps the shown word (D13).
+        // surrounding-text client keeps the shown word (D13, D17: set_caps too).
         let away = if caps == SURROUNDING {
             Vec::new()
         } else {
@@ -148,7 +148,7 @@ fn every_word_end_event_commits_the_finished_text() {
         let (mut ime, id) = typed_the_best(caps);
         let other = if caps == HOLD { PREEDIT } else { HOLD };
         ime.set_caps(id, other);
-        assert_eq!(ime.take_pending(id), want, "set_caps {caps:?}");
+        assert_eq!(ime.take_pending(id), away, "set_caps {caps:?}");
 
         let (mut ime, id) = typed_the_best(caps);
         let actions: Vec<Action> = tap_ctrl_shift(&mut ime, id)
@@ -283,7 +283,7 @@ fn debug_prints_no_word() {
 #[test]
 fn surrounding_mode_never_rewrites_after_a_click_or_focus_change() {
     // `the bét` shown, then the cursor moves (click) before the reset arrives:
-    // a delete there would remove other text, so nothing is sent (D13).
+    // a delete there would remove other text, so nothing is sent (D13, D17: set_caps too).
     let mut ime = ime();
     let id = ctx(&mut ime, SURROUNDING);
     let mut app = App::default();
@@ -319,4 +319,43 @@ fn a_reset_mid_word_or_between_words_replays_the_terminal_flake() {
     app.apply_actions(&ime.reset(id));
     app.type_str(&mut ime, id, "best ");
     assert_eq!(app.text, "has the bét ");
+}
+
+#[test]
+fn backspace_with_no_word_in_progress_resets_the_language() {
+    // The word before the cursor may be gone, so the language starts over (D16).
+    for caps in MODES {
+        let mut ime = ime();
+        let id = ctx(&mut ime, caps);
+        let mut app = App::default();
+        app.type_str(&mut ime, id, "user <<<<<bets ");
+        assert_eq!(app.text, "bét ", "user caps {caps:?}");
+
+        let mut ime = common::ime();
+        let id = ctx(&mut ime, caps);
+        let mut app = App::default();
+        app.type_str(&mut ime, id, "email <<<<<<max ");
+        assert_eq!(app.text, "mã ", "email caps {caps:?}");
+    }
+}
+
+#[test]
+fn backspace_inside_a_word_keeps_the_language() {
+    let mut ime = ime();
+    let id = ctx(&mut ime, PREEDIT);
+    let mut app = App::default();
+    app.type_str(&mut ime, id, "the bestt<");
+    app.type_str(&mut ime, id, " ");
+    assert_eq!(app.text, "the best ");
+}
+
+#[test]
+fn set_caps_keeps_the_shown_word_in_surrounding_mode() {
+    // D17: no key drives it, so the cursor may be elsewhere; nothing is sent.
+    for other in [PREEDIT, HOLD, PASSWORD] {
+        let (mut ime, id) = typed_the_best(SURROUNDING);
+        ime.set_caps(id, other);
+        assert!(ime.take_pending(id).is_empty(), "to {other:?}");
+        assert_eq!(ime.buffered_len(id), 0);
+    }
 }
