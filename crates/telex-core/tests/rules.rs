@@ -179,8 +179,32 @@ fn more_letters_after_undo_restore_raw() {
         ("session", "session"),
         ("array", "array"),
         ("password", "password"),
-        ("xooong", "xooong"),
+        ("xooong", "xoong"),
         ("asss", "asss"),
+    ]);
+}
+
+#[test]
+fn consonant_after_undo_continues_the_shown_text() {
+    check(&[
+        ("lisst", "list"),
+        ("tesst", "test"),
+        ("parrt", "part"),
+        ("nexxt", "next"),
+        ("soft", "soft"),
+        ("sofft", "soft"),
+        ("hajjt", "hajt"),
+        ("aaat", "aat"),
+        ("seeet", "seet"),
+        ("booot", "boot"),
+        ("tawwn", "tawn"),
+        ("uwwt", "uwt"),
+        ("towwn", "town"),
+        ("dddt", "ddt"),
+        ("ddds", "dds"),
+        ("offline", "offline"),
+        ("sorry", "sorry"),
+        ("cherry", "cherry"),
     ]);
 }
 
@@ -317,6 +341,10 @@ fn backspace_after_undo_removes_last_shown_char() {
         ("booss<", "bô"),
         ("booss<s", "bố"),
         ("ass<s", "á"),
+        ("lisst<", "lis"),
+        ("lisst<<", "li"),
+        ("lisst<t", "list"),
+        ("lisst<s", "liss"),
         ("vieet1<", "viêt"),
         ("vieet1<j", "việt"),
     ]);

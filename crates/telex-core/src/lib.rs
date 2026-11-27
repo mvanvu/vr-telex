@@ -144,9 +144,15 @@ impl Composer {
                 self.text.push(ch);
                 return Outcome::Invalid;
             }
-            // More letters after an undo mean a foreign word (`session`, `array`).
+            // After an undo the next letter decides: a foreign word keeps the raw
+            // keys (`session`, `array`, `offline`, `asss`); otherwise the word goes
+            // on from the text shown (`lis` + `t` → `list`).
             Mode::Undone if ch.is_ascii_alphabetic() => {
-                self.restore_raw();
+                if self.keeps_raw_after_undo(ch) {
+                    self.restore_raw();
+                } else {
+                    self.continue_shown(ch);
+                }
                 return Outcome::Invalid;
             }
             _ if !ch.is_ascii_alphabetic() => {
@@ -321,6 +327,23 @@ impl Composer {
         self.tone = Tone::None;
         self.mode = Mode::Viet;
         self.tone_key_last = false;
+    }
+
+    /// `ch` is already in `raw`; the undone key is the one before it.
+    fn keeps_raw_after_undo(&self, ch: char) -> bool {
+        let mut keys = self.raw.chars().rev().skip(1);
+        let undone = keys.next().map(|k| k.to_ascii_lowercase());
+        let k = ch.to_ascii_lowercase();
+        // `l` / `r` form the clusters of `offline`, `offroad`.
+        is_raw_vowel_key(ch) || matches!(k, 'l' | 'r') || Some(k) == undone
+    }
+
+    /// Passthrough from the text shown, so BackSpace works on what is on screen.
+    fn continue_shown(&mut self, ch: char) {
+        self.text.push(ch);
+        wipe_string(&mut self.raw);
+        self.raw.push_str(&self.text);
+        self.enter_passthrough(Mode::Raw);
     }
 
     fn restore_raw(&mut self) {
@@ -697,4 +720,12 @@ fn with_tone(c: char, tone: Tone) -> char {
         .iter()
         .find(|(v, _)| *v == c)
         .map_or(c, |(_, forms)| forms[tone.column()])
+}
+
+/// Keys that start or extend a vowel (`w` is the horn key).
+fn is_raw_vowel_key(ch: char) -> bool {
+    matches!(
+        ch.to_ascii_lowercase(),
+        'a' | 'e' | 'i' | 'o' | 'u' | 'y' | 'w'
+    )
 }

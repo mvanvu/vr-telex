@@ -68,7 +68,7 @@ as typed.
 | Limit | Detail |
 |---|---|
 | `aa` `ee` `oo` must be adjacent | The two keys must be next to each other to change the vowel. |
-| Some words cannot be typed | `uow` always gives `ươ`, so `thuở` and `huơ` are not possible. After undo by repeating a key the rest of the word stays raw, so `xoong` is not possible. |
+| Some words cannot be typed | `uow` always gives `ươ`, so `thuở` and `huơ` are not possible. |
 | VS Code integrated terminal | Letters can be lost when keys arrive faster than about 30 ms apart. This is an xterm.js limitation; human typing is far slower. |
 | Chrome address bar | Tab moves focus to the suggestion's remove button (Chrome's own behaviour, in English too). Use Enter, or → / End then Enter. |
 | Qt apps | They need the fcitx5 Qt frontend package (`fcitx5-frontend-qt5` and/or `fcitx5-frontend-qt6`). Without it Qt apps have no Vietnamese input. Qt apps started before install keep receiving raw keys until restarted; nothing is lost. |
